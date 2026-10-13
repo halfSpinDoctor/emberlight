@@ -15,7 +15,7 @@
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
 
     <!-- Version and the details Windows shows under Properties > Details -->
-    <Version>0.2.0</Version>
+    <Version>0.1.0</Version>
     <Product>Emberlight</Product>
     <AssemblyTitle>Emberlight</AssemblyTitle>
     <Description>Fast image browser and slideshow viewer - a Windows port of Phoenix Slides</Description>
