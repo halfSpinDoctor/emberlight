@@ -1,0 +1,42 @@
+<Window x:Class="Emberlight.App.SlideshowWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctl="clr-namespace:Emberlight.App.Controls"
+        Icon="Assets/app.ico"
+        Title="Emberlight" Width="1000" Height="720" Background="Black">
+    <Grid>
+        <ctl:ImageViewerControl x:Name="Viewer"/>
+
+        <!-- file info / EXIF overlay (top left) -->
+        <Border x:Name="InfoPanel" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="14"
+                Padding="12,8" CornerRadius="6" Background="#B3000000" Visibility="Collapsed"
+                IsHitTestVisible="False" MaxWidth="720">
+            <StackPanel>
+                <TextBlock x:Name="InfoText" Foreground="White" FontSize="14" TextWrapping="Wrap"/>
+                <TextBlock x:Name="ExifText" Foreground="#FFDDDDDD" FontSize="12" Margin="0,8,0,0"
+                           TextWrapping="Wrap" Visibility="Collapsed"/>
+            </StackPanel>
+        </Border>
+
+        <!-- centred status message: "Loading...", "Could not open...", "No more images" -->
+        <TextBlock x:Name="MessageText" HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Foreground="#FFBBBBBB" FontSize="22" Visibility="Collapsed" IsHitTestVisible="False"
+                   TextAlignment="Center" TextWrapping="Wrap" MaxWidth="800"/>
+
+        <!-- short confirmation messages, e.g. the folder you just jumped to -->
+        <Border x:Name="ToastPanel" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,48"
+                Padding="20,10" CornerRadius="8" Background="#CC000000" Visibility="Collapsed" IsHitTestVisible="False">
+            <TextBlock x:Name="ToastText" Foreground="White" FontSize="18"/>
+        </Border>
+
+        <!-- brief "looped around" indicator -->
+        <TextBlock x:Name="LoopIndicator" Text="&#x21BB;" FontSize="110" Foreground="White" Opacity="0"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
+
+        <!-- help overlay -->
+        <Border x:Name="HelpPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="22,16"
+                CornerRadius="8" Background="#E6101010" Visibility="Collapsed" IsHitTestVisible="False">
+            <TextBlock x:Name="HelpText" Foreground="White" FontFamily="Consolas" FontSize="14"/>
+        </Border>
+    </Grid>
+</Window>

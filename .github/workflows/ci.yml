@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build-and-test:
+    # Windows, because the WPF app (net10.0-windows) can only be built there.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build everything (Core, WPF app, tests)
+        run: dotnet build Emberlight.sln -c Release
+
+      - name: Run core tests
+        # The runner returns a non-zero exit code if any test fails.
+        run: dotnet run --project tests/Emberlight.Tests -c Release --no-build

@@ -1,0 +1,160 @@
+<Window x:Class="Emberlight.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:Emberlight.App.ViewModels"
+        xmlns:ctl="clr-namespace:Emberlight.App.Controls"
+        Icon="Assets/app.ico"
+        Title="Emberlight" Width="1100" Height="720" MinWidth="560" MinHeight="360"
+        AllowDrop="True" DragEnter="OnDragOver" DragOver="OnDragOver" Drop="OnDrop">
+
+    <Window.Resources>
+        <!-- Zero padding/border so every cell is exactly CellWidth + 2*margin wide; the visible-range
+             maths in ThumbnailGridMath relies on that. -->
+        <Style x:Key="ThumbContainerStyle" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="VerticalContentAlignment" Value="Stretch"/>
+        </Style>
+
+        <DataTemplate x:Key="ThumbTemplate" DataType="{x:Type vm:ThumbnailItem}">
+            <Border Margin="4" Background="Transparent" ToolTip="{Binding ToolTipText}"
+                    Width="{Binding DataContext.CellWidth, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}"
+                    Height="{Binding DataContext.CellHeight, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}">
+                <DockPanel LastChildFill="True">
+                    <TextBlock DockPanel.Dock="Bottom" Height="20" Padding="2,2,2,0"
+                               Text="{Binding FileName}" TextTrimming="CharacterEllipsis" TextAlignment="Center"
+                               Visibility="{Binding DataContext.FilenameVisibility, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}"/>
+                    <Image Source="{Binding Thumbnail}" Stretch="Uniform" Margin="2"
+                           LayoutTransform="{Binding OrientationTransform}"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                </DockPanel>
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
+
+    <DockPanel>
+        <!-- ============================ menu ============================ -->
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Open Folder..." InputGestureText="Ctrl+O" Click="OnOpenFolder"/>
+                <Separator/>
+                <MenuItem Header="Start _Slideshow" InputGestureText="Enter" Click="OnStartSlideshow"/>
+                <MenuItem Header="Start Slideshow in a _Window" Click="OnStartSlideshowWindowed"/>
+                <Separator/>
+                <MenuItem Header="Move to Recycle _Bin" InputGestureText="Del" Click="OnDelete"/>
+                <MenuItem Header="_Copy To..." Click="OnCopyTo"/>
+                <MenuItem Header="_Move To..." Click="OnMoveTo"/>
+                <Separator/>
+                <MenuItem Header="E_xit" InputGestureText="Alt+F4" Click="OnExit"/>
+            </MenuItem>
+            <MenuItem Header="_Image">
+                <MenuItem Header="Rotate _Left (EXIF tag)" Click="OnRotateLeft"/>
+                <MenuItem Header="Rotate _Right (EXIF tag)" Click="OnRotateRight"/>
+                <MenuItem Header="Reset Orientation _Tag" Click="OnResetOrientation"/>
+            </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem x:Name="SortMenu" Header="_Sort By"/>
+                <MenuItem x:Name="MenuShowFilenames" Header="Show _Filenames" IsCheckable="True" Click="OnToggleFilenames"/>
+                <MenuItem x:Name="MenuSubfolders" Header="Include S_ubfolders" IsCheckable="True" Click="OnToggleSubfolders"/>
+                <Separator/>
+                <MenuItem x:Name="MenuInfoPanel" Header="_Info Panel" InputGestureText="Ctrl+I" IsCheckable="True" Click="OnToggleInfoPanel"/>
+                <MenuItem x:Name="MenuMoreExif" Header="More _EXIF Details" IsCheckable="True" Click="OnToggleMoreExif"/>
+                <Separator/>
+                <MenuItem Header="_Larger Thumbnails" InputGestureText="Ctrl++" Click="OnLarger"/>
+                <MenuItem Header="S_maller Thumbnails" InputGestureText="Ctrl+-" Click="OnSmaller"/>
+                <Separator/>
+                <MenuItem Header="_Refresh" InputGestureText="F5" Click="OnRefresh"/>
+            </MenuItem>
+            <MenuItem Header="S_lideshow">
+                <MenuItem x:Name="MenuLoop" Header="_Loop" IsCheckable="True" Click="OnSlideshowOption"/>
+                <MenuItem x:Name="MenuRandom" Header="_Random Order" IsCheckable="True" Click="OnSlideshowOption"/>
+                <MenuItem x:Name="MenuScaleUp" Header="Scale Small Images _Up" IsCheckable="True" Click="OnSlideshowOption"/>
+                <MenuItem x:Name="MenuActualSize" Header="Show _Actual Size" IsCheckable="True" Click="OnSlideshowOption"/>
+                <MenuItem x:Name="MenuAutoAdvance" Header="Auto-_advance" IsCheckable="True" Click="OnSlideshowOption"/>
+                <MenuItem x:Name="MenuFullScreen" Header="_Full Screen by Default" IsCheckable="True" Click="OnSlideshowOption"/>
+            </MenuItem>
+            <MenuItem Header="_Tools">
+                <MenuItem Header="_Preferences..." Click="OnPreferences"/>
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="_About Emberlight" Click="OnAbout"/>
+            </MenuItem>
+        </Menu>
+
+        <!-- =========================== status bar =========================== -->
+        <StatusBar DockPanel.Dock="Bottom">
+            <StatusBarItem DockPanel.Dock="Right">
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="SlideshowButton" Content="Slideshow" Padding="14,1" Margin="0,0,16,0"
+                            VerticalAlignment="Center" IsEnabled="False" Click="OnStartSlideshow"
+                            ToolTip="Start a slideshow of the selected images, or of the whole folder (Enter)"/>
+                    <CheckBox x:Name="SubfoldersCheck" Content="Include subfolders" VerticalAlignment="Center"
+                              Margin="0,0,14,0" Click="OnToggleSubfolders"
+                              ToolTip="Show images from all folders below the selected one"/>
+                    <CheckBox x:Name="RandomCheck" Content="Random" VerticalAlignment="Center"
+                              Margin="0,0,16,0" Click="OnToggleRandom"
+                              ToolTip="Show slideshows in random order (press S during a slideshow to toggle it)"/>
+                    <TextBlock Text="Size " VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <Slider Minimum="40" Maximum="400" Width="150" VerticalAlignment="Center"
+                            Value="{Binding CellWidth, Mode=TwoWay}" SmallChange="10" LargeChange="40"
+                            ToolTip="Thumbnail size"/>
+                </StackPanel>
+            </StatusBarItem>
+            <StatusBarItem x:Name="BusyItem" Visibility="Collapsed">
+                <ProgressBar x:Name="BusyBar" Width="130" Height="12" IsIndeterminate="True"/>
+            </StatusBarItem>
+            <StatusBarItem>
+                <TextBlock x:Name="StatusText" TextTrimming="CharacterEllipsis"/>
+            </StatusBarItem>
+        </StatusBar>
+
+        <!-- ============================ content ============================ -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="TreeColumn" Width="240" MinWidth="120"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*" MinWidth="200"/>
+                <ColumnDefinition x:Name="InfoColumn" Width="0"/>
+            </Grid.ColumnDefinitions>
+
+            <TreeView x:Name="FolderTree" Grid.Column="0" BorderThickness="0,0,1,0"
+                      SelectedItemChanged="OnFolderSelected"
+                      PreviewMouseLeftButtonDown="OnTreePreviewMouseDown"/>
+
+            <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                          Background="Transparent" ResizeBehavior="PreviousAndNext"/>
+
+            <ListBox x:Name="ThumbList" Grid.Column="2" BorderThickness="0" SelectionMode="Extended"
+                     ItemTemplate="{StaticResource ThumbTemplate}"
+                     ItemContainerStyle="{StaticResource ThumbContainerStyle}"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     ScrollViewer.CanContentScroll="True"
+                     SelectionChanged="OnSelectionChanged"
+                     MouseDoubleClick="OnThumbDoubleClick"
+                     PreviewKeyDown="OnThumbKeyDown">
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <!-- Virtualizing: only the visible rows get containers. Cell size comes from the same
+                             ViewSettings that sizes the item template, so the two always agree. -->
+                        <ctl:VirtualizingGridPanel
+                            ItemWidth="{Binding DataContext.OuterCellWidth, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}"
+                            ItemHeight="{Binding DataContext.OuterCellHeight, RelativeSource={RelativeSource AncestorType={x:Type ListBox}}}"/>
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+            </ListBox>
+
+            <Border x:Name="InfoPanel" Grid.Column="3" BorderBrush="#FFD0D0D0" BorderThickness="1,0,0,0"
+                    Visibility="Collapsed">
+                <DockPanel>
+                    <TextBlock x:Name="InfoHeader" DockPanel.Dock="Top" FontWeight="SemiBold" Margin="10,10,10,4"
+                               TextTrimming="CharacterEllipsis"/>
+                    <TextBox x:Name="InfoBody" IsReadOnly="True" BorderThickness="0" TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto" Margin="6,0,6,6" Background="Transparent"/>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>

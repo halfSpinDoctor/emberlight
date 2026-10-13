@@ -1,0 +1,1049 @@
+using System.ComponentModel;
+using System.IO;
+using System.Text;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
+using Microsoft.Win32;
+using Emberlight.App.Services;
+using Emberlight.App.ViewModels;
+using Emberlight.Core;
+
+namespace Emberlight.App;
+
+/// <summary>
+/// The browser window: folder tree, thumbnail grid, status bar and info panel. Port of
+/// CreeveyMainWindowController + DirBrowserDelegate + DYWrappingMatrix. Sorting, scanning, grid geometry
+/// and file watching are done by the core library; this class wires them to WPF controls.
+/// </summary>
+public partial class MainWindow : Window
+{
+    private static readonly (SortField Field, string Label)[] SortChoices =
+    {
+        (SortField.Name, "Name"),
+        (SortField.DateModified, "Date Modified"),
+        (SortField.ExifDate, "EXIF Date"),
+        (SortField.DateAdded, "Date Created"),
+        (SortField.Type, "File Type"),
+        (SortField.Size, "File Size"),
+        (SortField.FilePath, "Full Path"),
+    };
+
+    private readonly AppSettings _settings;
+    private readonly string? _startPath;
+    private readonly ImageFileTypes _types = new();
+    private readonly DirectoryScanner _scanner;
+    private readonly FileMetadataCache _meta = new();
+    private readonly BulkObservableCollection<ThumbnailItem> _items = new();
+    private readonly Dictionary<string, ThumbnailItem> _itemByPath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ViewSettings _view = new();
+    private readonly ThumbnailLoader _loader;
+    private readonly FolderWatcher _watcher;
+
+    private IComparer<string> _comparer;
+    private SortOrder _sortOrder;
+    private string? _currentFolder;
+    private string? _pendingSelectPath;
+    private readonly DispatcherTimer _followTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
+    private string? _followPath;           // folder the slideshow most recently jumped to; the browser follows after a short pause
+    private bool _isLoading;               // a folder navigation is in progress
+    private int _keepFirst, _keepEnd;     // items in [_keepFirst, _keepEnd) may hold a decoded thumbnail
+    private string? _subfolderRoot;      // folder at which "Include subfolders" was switched on; it stays on only inside this tree
+    private CancellationTokenSource? _scanCts;
+    private ScrollViewer? _thumbScroll;
+    private bool _suppressTreeNav;
+    private bool _moreExif;
+
+    public MainWindow(AppSettings settings, string? startPath)
+    {
+        InitializeComponent();
+        _settings = settings;
+        _startPath = startPath;
+
+        _types.ApplyIgnored(settings.IgnoredFileTypes);
+        _scanner = new DirectoryScanner(_types);
+        _sortOrder = settings.SortOrder;
+        _comparer = FileComparers.For(_sortOrder, _meta);
+
+        _view.CellWidth = settings.ThumbCellWidth;
+        _view.ShowFilenames = settings.ShowFilenames;
+        DataContext = _view;
+        ThumbnailItem.AutoRotate = settings.AutoRotateByOrientationTag;
+
+        Width = settings.MainWindowWidth;
+        Height = settings.MainWindowHeight;
+        TreeColumn.Width = new GridLength(settings.FolderTreeWidth);
+        ThumbList.ItemsSource = _items;
+        ThumbList.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler((_, _) => UpdateVisibleThumbnails()));
+        ThumbList.SizeChanged += (_, _) => UpdateVisibleThumbnails();
+
+        _loader = new ThumbnailLoader(Dispatcher);
+        _watcher = new FolderWatcher(_scanner.ShouldShowFile);
+        _watcher.FilesChanged += (changed, deleted) => Dispatcher.BeginInvoke(new Action(() => OnWatcherChanged(changed, deleted)));
+        _watcher.RootChanged += () => Dispatcher.BeginInvoke(new Action(OnWatcherRootChanged));
+        _watcher.RescanNeeded += () => Dispatcher.BeginInvoke(new Action(Rescan));
+        _view.PropertyChanged += OnViewSettingsChanged;
+
+        BuildSortMenu();
+        SyncMenuState();
+
+        _followTimer.Tick += (_, _) => FlushFolderFollow();
+        Loaded += OnLoaded;
+        Closing += OnClosing;
+        Closed += (_, _) => { _watcher.Dispose(); _loader.Dispose(); };
+    }
+
+    // ===============================================================================================
+    // Startup / shutdown
+    // ===============================================================================================
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        BuildTreeRoots();
+        _loader.Configure(ThumbDecodeSize());
+
+        string start = ResolveStartPath();
+        SelectPathInTree(start);
+        NavigateTo(start);
+
+        if (_settings.InfoPanelVisible) SetInfoPanelVisible(true);
+    }
+
+    private string ResolveStartPath()
+    {
+        string? candidate = null;
+        if (_startPath != null)
+        {
+            if (Directory.Exists(_startPath)) candidate = _startPath;
+            else if (File.Exists(_startPath))
+            {
+                candidate = Path.GetDirectoryName(Path.GetFullPath(_startPath));
+                _pendingSelectPath = Path.GetFullPath(_startPath);
+            }
+        }
+        candidate ??= _settings.StartupOption == StartupFolder.LastFolder ? _settings.LastFolderPath : _settings.PicturesFolderPath;
+        if (string.IsNullOrWhiteSpace(candidate) || !Directory.Exists(candidate))
+            candidate = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+        if (string.IsNullOrWhiteSpace(candidate) || !Directory.Exists(candidate))
+            candidate = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return candidate;
+    }
+
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        _scanCts?.Cancel();
+        CaptureSessionState();
+        SettingsStore.Save(_settings);
+    }
+
+    /// <summary>
+    /// Copies state that lives in the UI (current folder, thumbnail size, sort order, window and column
+    /// sizes) into the settings object so that whenever settings are saved they are current.
+    /// </summary>
+    private void CaptureSessionState()
+    {
+        if (_currentFolder != null) _settings.LastFolderPath = _currentFolder;
+        _settings.ThumbCellWidth = _view.CellWidth;
+        _settings.ShowFilenames = _view.ShowFilenames;
+        _settings.SortOrder = _sortOrder;
+        if (WindowState == WindowState.Normal)
+        {
+            _settings.MainWindowWidth = ActualWidth;
+            _settings.MainWindowHeight = ActualHeight;
+        }
+        if (TreeColumn.ActualWidth > 0) _settings.FolderTreeWidth = TreeColumn.ActualWidth;
+        _settings.IgnoredFileTypes = _types.DisabledExtensions.ToList();
+    }
+
+    // ===============================================================================================
+    // Folder tree
+    // ===============================================================================================
+
+    private void BuildTreeRoots()
+    {
+        FolderTree.Items.Clear();
+        void AddQuick(string? path, string label)
+        {
+            if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+                FolderTree.Items.Add(MakeTreeItem(path, "\u2605 " + label));   // star marks the shortcuts
+        }
+        AddQuick(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Pictures");
+        AddQuick(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Desktop");
+        AddQuick(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Documents");
+        AddQuick(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"), "Downloads");
+
+        foreach (var drive in DriveInfo.GetDrives())
+        {
+            try
+            {
+                if (drive.IsReady) FolderTree.Items.Add(MakeTreeItem(drive.RootDirectory.FullName, drive.Name));
+            }
+            catch (IOException) { }
+        }
+    }
+
+    private TreeViewItem MakeTreeItem(string path, string header)
+    {
+        var item = new TreeViewItem { Header = header, Tag = path };
+        item.Items.Add(new TreeViewItem { Header = "\u2026" });   // placeholder child so the expander arrow shows
+        item.Expanded += OnTreeItemExpanded;
+        return item;
+    }
+
+    private static bool IsPlaceholder(TreeViewItem item)
+        => item.Items.Count == 1 && item.Items[0] is TreeViewItem { Tag: null };
+
+    private void OnTreeItemExpanded(object sender, RoutedEventArgs e)
+    {
+        if (e.OriginalSource is TreeViewItem item && ReferenceEquals(item, sender)) EnsureChildrenLoaded(item);
+    }
+
+    private void EnsureChildrenLoaded(TreeViewItem item)
+    {
+        if (!IsPlaceholder(item) || item.Tag is not string path) return;
+        item.Items.Clear();
+
+        var dirs = new List<string>();
+        try
+        {
+            var options = new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = FileAttributes.Hidden | FileAttributes.System };
+            dirs.AddRange(Directory.EnumerateDirectories(path, "*", options));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+
+        dirs.Sort((a, b) => NaturalStringComparer.Instance.Compare(Path.GetFileName(a), Path.GetFileName(b)));
+        foreach (var d in dirs) item.Items.Add(MakeTreeItem(d, Path.GetFileName(d)));
+    }
+
+    /// <summary>Expands the tree down to <paramref name="path"/> (via its drive) and selects it without navigating.</summary>
+    private void SelectPathInTree(string path)
+    {
+        string full;
+        try { full = Path.GetFullPath(path); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return; }
+
+        string root = Path.GetPathRoot(full) ?? "";
+        var current = FolderTree.Items.OfType<TreeViewItem>().FirstOrDefault(i =>
+            i.Tag is string t && string.Equals(t.TrimEnd('\\', '/'), root.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)
+            && !i.Header.ToString()!.StartsWith('\u2605'));
+        if (current == null) return;      // e.g. a network path with no drive letter
+
+        string acc = root;
+        foreach (string segment in full[root.Length..].Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            current.IsExpanded = true;
+            EnsureChildrenLoaded(current);
+            acc = Path.Combine(acc, segment);
+            var child = current.Items.OfType<TreeViewItem>().FirstOrDefault(i =>
+                i.Tag is string t && string.Equals(t, acc, StringComparison.OrdinalIgnoreCase));
+            if (child == null) break;
+            current = child;
+        }
+
+        _suppressTreeNav = true;
+        try { current.IsSelected = true; }
+        finally { _suppressTreeNav = false; }
+        current.BringIntoView();
+    }
+
+    /// <summary>
+    /// Clicking a folder's name expands it, so its subfolders appear without a second click on the arrow.
+    /// The arrow itself still toggles normally, and a double-click no longer collapses what the first click
+    /// just opened (WPF's default double-click toggles). Keyboard navigation doesn't auto-expand.
+    /// </summary>
+    private void OnTreePreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+        var source = e.OriginalSource as DependencyObject;
+        if (FindAncestor<ToggleButton>(source) != null) return;           // the expander arrow handles itself
+        if (FindAncestor<TreeViewItem>(source) is not { } item) return;
+
+        if (e.ClickCount > 1) { e.Handled = true; return; }               // keep it open on double-click
+        if (item.HasItems) item.IsExpanded = true;                        // loads the children on first expand
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? d) where T : DependencyObject
+    {
+        while (d != null)
+        {
+            if (d is T match) return match;
+            d = d is Visual ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d);   // Runs etc. aren't Visuals
+        }
+        return null;
+    }
+
+    private void OnFolderSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        if (_suppressTreeNav) return;
+        if (e.NewValue is TreeViewItem { Tag: string path }) NavigateTo(path);
+    }
+
+    // ===============================================================================================
+    // Navigation and scanning
+    // ===============================================================================================
+
+    private async void NavigateTo(string path)
+    {
+        try { await NavigateToAsync(path); }
+        catch (Exception ex) { StatusText.Text = ex.Message; }
+    }
+
+    private async Task NavigateToAsync(string path)
+    {
+        _scanCts?.Cancel();
+        var cts = _scanCts = new CancellationTokenSource();
+        var ct = cts.Token;
+
+        ApplySubfolderPolicy(path);
+        _isLoading = true;
+        _currentFolder = path;
+        _watcher.Stop();
+        _loader.Reset();
+        _meta.Clear();
+        _comparer = FileComparers.For(_sortOrder, _meta);
+        Title = $"{new DirectoryInfo(path).Name} \u2014 Emberlight";
+
+        // Show an empty grid and a busy indicator immediately, so the user can see the click was received.
+        _itemByPath.Clear();
+        _keepFirst = _keepEnd = 0;
+        _items.ReplaceAll(Array.Empty<ThumbnailItem>());
+        SlideshowButton.IsEnabled = false;
+        BeginBusy("Scanning folder\u2026");
+
+        var comparer = _comparer;
+        bool recurse = _settings.IncludeSubfolders;
+        // Progress<T> captures the UI context, so this callback runs on the UI thread.
+        var scanProgress = new Progress<int>(n =>
+        {
+            if (!ct.IsCancellationRequested) StatusText.Text = $"Scanning\u2026 {n:N0} images found";
+        });
+
+        List<string> files;
+        try
+        {
+            files = await Task.Run(() => _scanner.Scan(path, recurse, ct, scanProgress), ct);
+            if (ct.IsCancellationRequested) return;
+
+            // Sorting by a file-system or EXIF date has to open every file, which can take a while.
+            BeginBusy(NeedsFileInspection(_sortOrder)
+                ? $"Sorting {files.Count:N0} images\u2026"
+                : $"Preparing {files.Count:N0} images\u2026");
+            await Task.Run(() => files.Sort(comparer), ct);
+        }
+        catch (OperationCanceledException) { return; }      // a newer navigation owns the status bar now
+        catch (Exception ex)
+        {
+            _isLoading = false;
+            EndBusy();
+            StatusText.Text = ex.Message;
+            return;
+        }
+
+        if (ct.IsCancellationRequested || !string.Equals(path, _currentFolder, StringComparison.OrdinalIgnoreCase)) return;
+
+        SetBusyProgress(files.Count, files.Count, $"Loading {files.Count:N0} images\u2026");
+        Populate(files);
+
+        _watcher.Watch(path, recurse);
+        if (_pendingSelectPath != null && _itemByPath.TryGetValue(_pendingSelectPath, out var wanted))
+        {
+            ThumbList.SelectedItem = wanted;
+            ThumbList.ScrollIntoView(wanted);
+        }
+        _pendingSelectPath = null;
+        _isLoading = false;
+        EndBusy();
+        UpdateStatus();
+    }
+
+    /// <summary>
+    /// Hands the whole list to the grid. The grid is virtualized, so this only creates containers for the
+    /// rows on screen no matter how many files there are; the cost is just wrapping each path in an item.
+    /// </summary>
+    private void Populate(List<string> files)
+    {
+        var items = new List<ThumbnailItem>(files.Count);
+        foreach (var f in files)
+        {
+            var item = new ThumbnailItem(f);
+            _itemByPath[f] = item;
+            items.Add(item);
+        }
+        _keepFirst = _keepEnd = 0;
+        _items.ReplaceAll(items);
+        UpdateVisibleThumbnails();       // start loading the first screenful straight away
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(UpdateVisibleThumbnails));   // and again once layout has run
+    }
+
+    private static bool NeedsFileInspection(SortOrder order)
+        => order.Key is not (SortField.Name or SortField.FilePath or SortField.Type);
+
+    // ---- busy indicator in the status bar ----
+
+    private void BeginBusy(string message)
+    {
+        BusyItem.Visibility = Visibility.Visible;
+        BusyBar.IsIndeterminate = true;
+        StatusText.Text = message;
+    }
+
+    private void SetBusyProgress(int done, int total, string message)
+    {
+        BusyBar.IsIndeterminate = false;
+        BusyBar.Maximum = Math.Max(1, total);
+        BusyBar.Value = done;
+        StatusText.Text = message;
+    }
+
+    private void EndBusy() => BusyItem.Visibility = Visibility.Collapsed;
+
+    /// <summary>
+    /// "Include subfolders" stays on while you browse within the tree where you switched it on, and is
+    /// switched off when you move to a folder outside that tree.
+    /// </summary>
+    private void ApplySubfolderPolicy(string newPath)
+    {
+        if (!_settings.IncludeSubfolders) { _subfolderRoot = null; return; }
+
+        // First navigation of the session (a remembered "on" from last time): the start folder is the tree root.
+        _subfolderRoot ??= _currentFolder ?? newPath;
+        if (PathUtil.IsSameOrDescendant(newPath, _subfolderRoot)) return;
+
+        _settings.IncludeSubfolders = false;
+        _subfolderRoot = null;
+        SyncMenuState();
+    }
+
+    private void Rescan()
+    {
+        if (_currentFolder != null) NavigateTo(_currentFolder);
+    }
+
+    // ===============================================================================================
+    // Thumbnail scheduling
+    // ===============================================================================================
+
+    private int ThumbDecodeSize()
+    {
+        double px = _view.CellWidth * VisualTreeHelper.GetDpi(this).DpiScaleX;
+        return px <= 150 ? 160 : px <= 230 ? 256 : px <= 330 ? 360 : 512;
+    }
+
+    private void OnViewSettingsChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ViewSettings.CellWidth) && _loader.Configure(ThumbDecodeSize()))
+            foreach (var item in _items) item.ResetThumbnail();   // different decode size: start over
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(UpdateVisibleThumbnails));
+    }
+
+    private ScrollViewer? FindThumbScroll()
+    {
+        if (_thumbScroll != null) return _thumbScroll;
+        static ScrollViewer? Find(DependencyObject o)
+        {
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(o); i++)
+            {
+                var child = VisualTreeHelper.GetChild(o, i);
+                if (child is ScrollViewer sv) return sv;
+                if (Find(child) is { } nested) return nested;
+            }
+            return null;
+        }
+        return _thumbScroll = Find(ThumbList);
+    }
+
+    /// <summary>Asks the loader for thumbnails of the cells that are (nearly) on screen.</summary>
+    private void UpdateVisibleThumbnails()
+    {
+        if (_items.Count == 0) return;
+        var sv = FindThumbScroll();
+        if (sv == null || sv.ViewportHeight <= 0) return;
+
+        var (first, end) = ThumbnailGridMath.VisibleRange(_items.Count, sv.ViewportWidth, sv.ViewportHeight,
+            sv.VerticalOffset, _view.OuterCellWidth, _view.OuterCellHeight, overscanRows: 2);
+        int stamp = _loader.NextStamp();
+        for (int i = first; i < end; i++) _items[i].WantedStamp = stamp;
+        for (int i = end - 1; i >= first; i--) _loader.Request(_items[i]);   // reversed: the loader serves newest-first
+
+        ReleaseDistantThumbnails(sv, first, end);
+    }
+
+    /// <summary>
+    /// A virtualized grid only has containers for what's on screen, but every item would otherwise keep its
+    /// decoded bitmap forever. Items that fall outside a window of a few screens around the viewport let
+    /// theirs go (the shared thumbnail cache still holds recent ones, so scrolling back is quick).
+    /// Only the part of the old window that fell out of the new one is visited, so this is cheap.
+    /// </summary>
+    private void ReleaseDistantThumbnails(ScrollViewer sv, int first, int end)
+    {
+        int cols = ThumbnailGridMath.Columns(sv.ViewportWidth, _view.OuterCellWidth);
+        int margin = cols * ThumbnailGridMath.VisibleRowCount(sv.ViewportHeight, _view.OuterCellHeight) * 4;
+        var (keepFirst, keepEnd) = ThumbnailGridMath.RetainedRange(_items.Count, first, end, margin);
+
+        int oldEnd = Math.Min(_keepEnd, _items.Count);
+        for (int i = Math.Min(_keepFirst, oldEnd); i < oldEnd; i++)
+        {
+            if ((i < keepFirst || i >= keepEnd) && _items[i].IsLoaded) _items[i].ResetThumbnail();
+        }
+        _keepFirst = keepFirst;
+        _keepEnd = keepEnd;
+    }
+
+    // ===============================================================================================
+    // Selection, status, info panel
+    // ===============================================================================================
+
+    private List<ThumbnailItem> SelectedItems() => ThumbList.SelectedItems.Cast<ThumbnailItem>().ToList();
+
+    private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateStatus();
+        UpdateInfoPanel();
+    }
+
+    private void UpdateStatus()
+    {
+        SlideshowButton.IsEnabled = _items.Count > 0;
+        var sb = new StringBuilder();
+        sb.Append(_items.Count == 1 ? "1 image" : $"{_items.Count} images");
+        var sel = SelectedItems();
+        if (sel.Count > 1) sb.Append($"  \u00B7  {sel.Count} selected");
+        else if (sel.Count == 1)
+        {
+            var item = sel[0];
+            sb.Append("  \u00B7  ").Append(item.FileName);
+            if (item.Info != null)
+                sb.Append("  \u00B7  ").Append(item.Info.PixelWidth).Append(" \u00D7 ").Append(item.Info.PixelHeight)
+                  .Append("  \u00B7  ").Append(FileSizeFormatter.Format((ulong)item.Info.FileSize));
+        }
+        StatusText.Text = sb.ToString();
+    }
+
+    private void UpdateInfoPanel()
+    {
+        if (InfoPanel.Visibility != Visibility.Visible) return;
+        var sel = SelectedItems();
+        if (sel.Count != 1)
+        {
+            InfoHeader.Text = sel.Count == 0 ? "No selection" : $"{sel.Count} files selected";
+            InfoBody.Text = "";
+            return;
+        }
+
+        var item = sel[0];
+        InfoHeader.Text = item.FileName;
+        var sb = new StringBuilder();
+        try
+        {
+            var fi = new FileInfo(item.Path);
+            sb.AppendLine($"Folder: {fi.DirectoryName}");
+            sb.AppendLine($"Size: {FileSizeFormatter.Format((ulong)fi.Length)}");
+            sb.AppendLine($"Modified: {fi.LastWriteTime:g}");
+        }
+        catch (IOException) { }
+        if (ImageService.TryReadSize(item.Path, out int w, out int h)) sb.AppendLine($"Dimensions: {w} \u00D7 {h}");
+        var exif = ExifReader.Read(item.Path);
+        if (exif != null)
+        {
+            string text = exif.ToDisplayString(_moreExif);
+            if (text.Length > 0) sb.AppendLine().AppendLine(text);
+        }
+        InfoBody.Text = sb.ToString();
+    }
+
+    private void SetInfoPanelVisible(bool visible)
+    {
+        InfoPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        InfoColumn.Width = new GridLength(visible ? 280 : 0);
+        _settings.InfoPanelVisible = visible;
+        MenuInfoPanel.IsChecked = visible;
+        UpdateInfoPanel();
+    }
+
+    // ===============================================================================================
+    // Sorting
+    // ===============================================================================================
+
+    private void BuildSortMenu()
+    {
+        SortMenu.Items.Clear();
+        foreach (var (field, label) in SortChoices)
+        {
+            var mi = new MenuItem { Header = label, Tag = field };
+            mi.Click += OnSortClick;
+            SortMenu.Items.Add(mi);
+        }
+    }
+
+    private void SyncMenuState()
+    {
+        foreach (MenuItem mi in SortMenu.Items)
+        {
+            var field = (SortField)mi.Tag;
+            string label = SortChoices.First(c => c.Field == field).Label;
+            bool active = field == _sortOrder.Key;
+            mi.IsChecked = active;
+            mi.Header = active ? label + (_sortOrder.Descending ? "  \u25BC" : "  \u25B2") : label;
+        }
+        MenuShowFilenames.IsChecked = _view.ShowFilenames;
+        MenuSubfolders.IsChecked = _settings.IncludeSubfolders;
+        SubfoldersCheck.IsChecked = _settings.IncludeSubfolders;
+        MenuInfoPanel.IsChecked = InfoPanel.Visibility == Visibility.Visible;
+        MenuMoreExif.IsChecked = _moreExif;
+        MenuLoop.IsChecked = _settings.SlideshowLoop;
+        MenuRandom.IsChecked = _settings.SlideshowRandom;
+        RandomCheck.IsChecked = _settings.SlideshowRandom;
+        MenuScaleUp.IsChecked = _settings.SlideshowScaleUp;
+        MenuActualSize.IsChecked = _settings.SlideshowActualSize;
+        MenuAutoAdvance.IsChecked = _settings.SlideshowAutoAdvance;
+        MenuFullScreen.IsChecked = _settings.SlideshowDefaultFullScreen;
+    }
+
+    private async void OnSortClick(object sender, RoutedEventArgs e)
+    {
+        var field = (SortField)((MenuItem)sender).Tag;
+        SortOrder order;
+        if (field == _sortOrder.Key) order = _sortOrder.Reversed();           // choosing it again reverses it
+        else order = new SortOrder(field, Descending: field is SortField.DateModified or SortField.ExifDate or SortField.DateAdded); // dates default to newest first, as in the original
+        try { await ApplySortAsync(order); }
+        catch (Exception ex) { StatusText.Text = ex.Message; }
+    }
+
+    private async Task ApplySortAsync(SortOrder order)
+    {
+        _sortOrder = order;
+        _meta.Clear();
+        _comparer = FileComparers.For(order, _meta);
+        SyncMenuState();
+        if (_items.Count == 0) return;
+
+        var selected = SelectedItems();
+        var paths = _items.Select(i => i.Path).ToList();
+        var comparer = _comparer;
+        StatusText.Text = "Sorting\u2026";
+        await Task.Run(() => paths.Sort(comparer));
+
+        _items.ReplaceAll(paths.Where(_itemByPath.ContainsKey).Select(p => _itemByPath[p]));
+        // Indices just moved, so any item might now be far from the viewport: treat everything as possibly
+        // loaded and let the next update release whatever falls outside the window.
+        _keepFirst = 0;
+        _keepEnd = _items.Count;
+        foreach (var s in selected) ThumbList.SelectedItems.Add(s);
+        if (selected.Count > 0) ThumbList.ScrollIntoView(selected[0]);
+        UpdateStatus();
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(UpdateVisibleThumbnails));
+    }
+
+    // ===============================================================================================
+    // Slideshow
+    // ===============================================================================================
+
+    private void StartSlideshow(bool fullScreen)
+    {
+        if (_items.Count == 0) return;
+        var selected = SelectedItems();
+
+        List<string> files;
+        int start;
+        if (selected.Count > 1)
+        {
+            // Several files selected: show just those, in grid order.
+            var wanted = selected.Select(i => i.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            files = _items.Where(i => wanted.Contains(i.Path)).Select(i => i.Path).ToList();
+            start = 0;
+        }
+        else
+        {
+            // One file (or none): show the whole folder, starting there.
+            files = _items.Select(i => i.Path).ToList();
+            start = selected.Count == 1 ? Math.Max(0, _items.IndexOf(selected[0])) : 0;
+        }
+
+        var show = new SlideshowWindow(_settings, files, start, _sortOrder, _scanner, _settings.IncludeSubfolders, _currentFolder, fullScreen);
+        show.FolderJumped += OnSlideshowFolderJumped;
+        show.Closed += (_, _) =>
+        {
+            FlushFolderFollow();       // if the browser hasn't caught up with the last jump yet, do it now
+            if (show.LastShownPath is { } p)
+            {
+                if (_itemByPath.TryGetValue(p, out var item))
+                {
+                    ThumbList.SelectedItem = item;
+                    ThumbList.ScrollIntoView(item);
+                }
+                else if (_isLoading)
+                {
+                    _pendingSelectPath = p;    // the folder is still loading; select the slide when it arrives
+                }
+            }
+            Activate();
+        };
+        show.Show();
+    }
+
+    /// <summary>
+    /// The slideshow jumped to another folder (Ctrl+Left/Right). Bring the browser along quietly in the
+    /// background, after a short pause so holding the key down doesn't reload the browser for every folder.
+    /// </summary>
+    private void OnSlideshowFolderJumped(string folder)
+    {
+        _followPath = folder;
+        _followTimer.Stop();
+        _followTimer.Start();
+    }
+
+    private void FlushFolderFollow()
+    {
+        _followTimer.Stop();
+        if (_followPath is not { } path) return;
+        _followPath = null;
+        if (string.Equals(path, _currentFolder, StringComparison.OrdinalIgnoreCase) || !Directory.Exists(path)) return;
+
+        // The slideshow just showed this folder (with its subfolders if that option is on), so the browser
+        // should too: make it the new root of the "include subfolders" tree rather than switching the option off.
+        if (_settings.IncludeSubfolders) _subfolderRoot = path;
+        OpenFolder(path);
+    }
+
+    private void OnStartSlideshow(object sender, RoutedEventArgs e) => StartSlideshow(_settings.SlideshowDefaultFullScreen);
+    private void OnStartSlideshowWindowed(object sender, RoutedEventArgs e) => StartSlideshow(false);
+
+    private void OnThumbDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject d && ItemsControl.ContainerFromElement(ThumbList, d) is ListBoxItem)
+            StartSlideshow(_settings.SlideshowDefaultFullScreen);
+    }
+
+    private void OnSlideshowOption(object sender, RoutedEventArgs e)
+    {
+        _settings.SlideshowLoop = MenuLoop.IsChecked;
+        _settings.SlideshowRandom = MenuRandom.IsChecked;
+        _settings.SlideshowScaleUp = MenuScaleUp.IsChecked;
+        _settings.SlideshowActualSize = MenuActualSize.IsChecked;
+        _settings.SlideshowAutoAdvance = MenuAutoAdvance.IsChecked;
+        _settings.SlideshowDefaultFullScreen = MenuFullScreen.IsChecked;
+        SyncMenuState();                       // keeps the status-bar Random checkbox in step with the menu
+    }
+
+    /// <summary>The status-bar "Random" checkbox: the same setting as Slideshow &gt; Random Order.</summary>
+    private void OnToggleRandom(object sender, RoutedEventArgs e)
+    {
+        _settings.SlideshowRandom = RandomCheck.IsChecked == true;
+        SyncMenuState();
+    }
+
+    // ===============================================================================================
+    // Keyboard
+    // ===============================================================================================
+
+    private void OnThumbKeyDown(object sender, KeyEventArgs e)
+    {
+        bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+        bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+        switch (e.Key)
+        {
+            case Key.Enter:
+                StartSlideshow(_settings.SlideshowDefaultFullScreen);
+                e.Handled = true;
+                break;
+            case Key.Delete:
+                OnDelete(sender, e);
+                e.Handled = true;
+                break;
+            case Key.Left or Key.Right or Key.Up or Key.Down or Key.PageUp or Key.PageDown or Key.Home or Key.End
+                when !shift && !ctrl && _items.Count > 0:
+                // Navigate by item index and row arithmetic rather than by the containers on screen:
+                // in a virtualized grid most items have no container to move focus between.
+                MoveSelection(e.Key);
+                e.Handled = true;
+                break;
+        }
+    }
+
+    private void MoveSelection(Key key)
+    {
+        var sv = FindThumbScroll();
+        int cols = ThumbnailGridMath.Columns(sv?.ViewportWidth ?? ThumbList.ActualWidth, _view.OuterCellWidth);
+        int page = cols * ThumbnailGridMath.VisibleRowCount(sv?.ViewportHeight ?? ThumbList.ActualHeight, _view.OuterCellHeight);
+        int current = ThumbList.SelectedIndex < 0 ? 0 : ThumbList.SelectedIndex;
+        int target = key switch
+        {
+            Key.Left => current - 1,
+            Key.Right => current + 1,
+            Key.Up => current - cols,
+            Key.Down => current + cols,
+            Key.PageUp => current - page,
+            Key.PageDown => current + page,
+            Key.Home => 0,
+            Key.End => _items.Count - 1,
+            _ => current,
+        };
+        SelectOnly(Math.Clamp(target, 0, _items.Count - 1));
+    }
+
+    private void SelectOnly(int index)
+    {
+        ThumbList.SelectedItems.Clear();
+        ThumbList.SelectedIndex = index;
+        var item = _items[index];
+        ThumbList.ScrollIntoView(item);
+        // The item's container may not exist until the next layout pass scrolls it into the realized range.
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+            (ThumbList.ItemContainerGenerator.ContainerFromItem(item) as ListBoxItem)?.Focus()));
+    }
+
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        base.OnPreviewKeyDown(e);
+        if (e.Handled) return;
+        bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+        if (e.Key == Key.F5) { Rescan(); e.Handled = true; }
+        else if (ctrl && e.Key == Key.O) { OnOpenFolder(this, e); e.Handled = true; }
+        else if (ctrl && e.Key == Key.I) { OnToggleInfoPanel(this, e); e.Handled = true; }
+        else if (ctrl && (e.Key == Key.OemPlus || e.Key == Key.Add)) { _view.CellWidth += 20; e.Handled = true; }
+        else if (ctrl && (e.Key == Key.OemMinus || e.Key == Key.Subtract)) { _view.CellWidth -= 20; e.Handled = true; }
+    }
+
+    // ===============================================================================================
+    // Menu: file operations
+    // ===============================================================================================
+
+    private void OnOpenFolder(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFolderDialog { Title = "Choose a folder of images" };
+        if (_currentFolder != null) dlg.InitialDirectory = _currentFolder;
+        if (dlg.ShowDialog(this) == true) OpenFolder(dlg.FolderName);
+    }
+
+    private void OpenFolder(string path)
+    {
+        if (!Directory.Exists(path)) return;
+        SelectPathInTree(path);
+        NavigateTo(path);
+    }
+
+    private void OnExit(object sender, RoutedEventArgs e) => Close();
+
+    private void OnDelete(object sender, RoutedEventArgs e)
+    {
+        var sel = SelectedItems();
+        if (sel.Count == 0) return;
+        if (sel.Count > 10 && MessageBox.Show(this, $"Move {sel.Count} files to the Recycle Bin?", "Emberlight",
+                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+
+        int index = ThumbList.SelectedIndex;
+        int failed = 0; string? firstError = null;
+        foreach (var item in sel)
+        {
+            if (RecycleBin.TryDelete(item.Path, out string? err)) RemoveItem(item.Path);
+            else { failed++; firstError ??= err; }
+        }
+        if (_items.Count > 0) SelectOnly(Math.Clamp(index, 0, _items.Count - 1));
+        UpdateStatus();
+        if (failed > 0) StatusText.Text = $"{failed} file(s) couldn't be deleted: {firstError}";
+    }
+
+    private void OnCopyTo(object sender, RoutedEventArgs e) => TransferSelected(move: false);
+    private void OnMoveTo(object sender, RoutedEventArgs e) => TransferSelected(move: true);
+
+    private void TransferSelected(bool move)
+    {
+        var sel = SelectedItems();
+        if (sel.Count == 0) return;
+        var dlg = new OpenFolderDialog { Title = move ? "Move selected files to..." : "Copy selected files to..." };
+        if (dlg.ShowDialog(this) != true) return;
+
+        int done = 0, failed = 0; string? firstError = null;
+        foreach (var item in sel)
+        {
+            try
+            {
+                if (move) { FileTransfer.MoveInto(item.Path, dlg.FolderName); RemoveItem(item.Path); }
+                else FileTransfer.CopyInto(item.Path, dlg.FolderName);
+                done++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                failed++; firstError ??= ex.Message;
+            }
+        }
+        StatusText.Text = $"{(move ? "Moved" : "Copied")} {done} file(s)" + (failed > 0 ? $"; {failed} failed: {firstError}" : "");
+    }
+
+    // ===============================================================================================
+    // Menu: lossless rotation via the EXIF orientation tag
+    // ===============================================================================================
+
+    private void OnRotateLeft(object sender, RoutedEventArgs e) => RotateSelected(-90);
+    private void OnRotateRight(object sender, RoutedEventArgs e) => RotateSelected(+90);
+    private void OnResetOrientation(object sender, RoutedEventArgs e) => RotateSelected(null);
+
+    /// <summary>
+    /// Rotates by rewriting the file's EXIF orientation value (two bytes; the pixels are untouched, so this
+    /// is lossless and instant). Only files that already carry an orientation tag can be changed this way.
+    /// </summary>
+    private void RotateSelected(int? degreesCw)
+    {
+        int ok = 0, skipped = 0;
+        foreach (var item in SelectedItems())
+        {
+            var data = ImageFileTypes.MayHaveExif(item.Path) ? ExifReader.Read(item.Path) : null;
+            if (data == null || data.Orientation == 0) { skipped++; continue; }
+            int newValue = degreesCw is { } d ? data.ImageOrientation.RotatedBy(d).ToExif() : 1;
+            if (ExifReader.TrySetOrientation(item.Path, newValue, _settings.PreserveModifiedDateOnEdit))
+            {
+                ok++;
+                _loader.Invalidate(item.Path);
+                _meta.Invalidate(item.Path);
+                item.ResetThumbnail();
+            }
+            else skipped++;
+        }
+        UpdateVisibleThumbnails();
+        StatusText.Text = ok == 0 && skipped == 0 ? "Nothing selected"
+            : $"Updated {ok} file(s)" + (skipped > 0 ? $"; {skipped} skipped (no EXIF orientation tag to change)" : "");
+    }
+
+    // ===============================================================================================
+    // Menu: view
+    // ===============================================================================================
+
+    private void OnToggleFilenames(object sender, RoutedEventArgs e) => _view.ShowFilenames = MenuShowFilenames.IsChecked;
+    /// <summary>Shared by the status-bar checkbox and the View menu item; keeps both in sync.</summary>
+    private void OnToggleSubfolders(object sender, RoutedEventArgs e)
+    {
+        bool on = sender is MenuItem ? MenuSubfolders.IsChecked : SubfoldersCheck.IsChecked == true;
+        _settings.IncludeSubfolders = on;
+        _subfolderRoot = on ? _currentFolder : null;        // the tree starts at the folder you're looking at
+        MenuSubfolders.IsChecked = on;
+        SubfoldersCheck.IsChecked = on;
+        Rescan();
+    }
+    private void OnToggleInfoPanel(object sender, RoutedEventArgs e) => SetInfoPanelVisible(InfoPanel.Visibility != Visibility.Visible);
+    private void OnToggleMoreExif(object sender, RoutedEventArgs e) { _moreExif = MenuMoreExif.IsChecked; UpdateInfoPanel(); }
+    private void OnLarger(object sender, RoutedEventArgs e) => _view.CellWidth += 20;
+    private void OnSmaller(object sender, RoutedEventArgs e) => _view.CellWidth -= 20;
+    private void OnRefresh(object sender, RoutedEventArgs e) => Rescan();
+
+    // ===============================================================================================
+    // Menu: preferences / about
+    // ===============================================================================================
+
+    private void OnPreferences(object sender, RoutedEventArgs e)
+    {
+        var dlg = new PreferencesWindow(_settings, _types) { Owner = this };
+        if (dlg.ShowDialog() != true) return;
+
+        ThumbnailItem.AutoRotate = _settings.AutoRotateByOrientationTag;
+        foreach (var item in _items) item.RefreshOrientation();
+        _view.ShowFilenames = _settings.ShowFilenames;
+        SyncMenuState();
+
+        // Save now rather than waiting for exit. Capture first so the file also holds the current
+        // folder, thumbnail size and sort order instead of stale values.
+        CaptureSessionState();
+        if (!SettingsStore.Save(_settings))
+            MessageBox.Show(this, "Your preferences were applied, but they couldn't be saved to disk.\n\n" + SettingsStore.DefaultPath,
+                "Emberlight", MessageBoxButton.OK, MessageBoxImage.Warning);
+
+        if (dlg.FileTypesChanged) Rescan();      // different extensions enabled: the file list changes
+        else StatusText.Text = "Preferences saved";
+    }
+
+    private void OnAbout(object sender, RoutedEventArgs e)
+        => MessageBox.Show(this,
+            "Emberlight\n\n" +
+            "Emberlight is a Windows port of Phoenix Slides by Dominic Yu\n(https://github.com/gobbledegook/creevey).\n\n" +
+            "Licensed under Creative Commons Attribution-NonCommercial-ShareAlike 2.0. " +
+            "See LICENSE-NOTICE.md.",
+            "About Emberlight", MessageBoxButton.OK, MessageBoxImage.Information);
+
+    // ===============================================================================================
+    // Drag and drop
+    // ===============================================================================================
+
+    private void OnDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Link : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void OnDrop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] dropped || dropped.Length == 0) return;
+        string first = dropped[0];
+        if (Directory.Exists(first)) { OpenFolder(first); return; }
+        if (File.Exists(first) && Path.GetDirectoryName(first) is { } dir)
+        {
+            _pendingSelectPath = first;
+            OpenFolder(dir);
+        }
+    }
+
+    // ===============================================================================================
+    // Live updates from the file watcher
+    // ===============================================================================================
+
+    private void OnWatcherChanged(IReadOnlyList<string> changed, IReadOnlyList<string> deleted)
+    {
+        foreach (var p in deleted) RemoveItem(p);
+        foreach (var p in changed) UpsertItem(p);
+        UpdateStatus();
+        UpdateVisibleThumbnails();
+    }
+
+    private void OnWatcherRootChanged()
+    {
+        // The folder we were showing is gone (deleted or renamed): fall back to its nearest existing parent.
+        string? p = _currentFolder;
+        while (!string.IsNullOrEmpty(p) && !Directory.Exists(p)) p = Path.GetDirectoryName(p);
+        if (!string.IsNullOrEmpty(p)) OpenFolder(p);
+    }
+
+    private void RemoveItem(string path)
+    {
+        _meta.Invalidate(path);
+        _loader.Invalidate(path);
+        if (!_itemByPath.TryGetValue(path, out var item)) return;
+        _itemByPath.Remove(path);
+        _items.Remove(item);
+    }
+
+    private void UpsertItem(string path)
+    {
+        _meta.Invalidate(path);
+        _loader.Invalidate(path);
+
+        if (_itemByPath.TryGetValue(path, out var existing))
+        {
+            existing.ResetThumbnail();
+            if (_sortOrder.Key != SortField.Name && _sortOrder.Key != SortField.FilePath)
+            {
+                // The sort key (date/size) may have changed, so the file may belong somewhere else now.
+                bool wasSelected = ThumbList.SelectedItems.Contains(existing);
+                _items.Remove(existing);
+                _items.Insert(FindInsertIndex(path), existing);
+                if (wasSelected) ThumbList.SelectedItems.Add(existing);
+            }
+            return;
+        }
+
+        var item = new ThumbnailItem(path);
+        _itemByPath[path] = item;
+        _items.Insert(FindInsertIndex(path), item);
+    }
+
+    private int FindInsertIndex(string path)
+    {
+        int lo = 0, hi = _items.Count;
+        while (lo < hi)
+        {
+            int mid = lo + ((hi - lo) >> 1);
+            if (_comparer.Compare(_items[mid].Path, path) < 0) lo = mid + 1; else hi = mid;
+        }
+        return lo;
+    }
+}

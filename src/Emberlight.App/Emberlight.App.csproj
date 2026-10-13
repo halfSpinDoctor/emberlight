@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>14.0</LangVersion>
+    <RootNamespace>Emberlight.App</RootNamespace>
+    <AssemblyName>Emberlight</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <!-- Icon shown in Explorer, the taskbar and Alt+Tab (the windows also use it; see the Resource item below) -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+
+    <!-- Version and the details Windows shows under Properties > Details -->
+    <Version>0.2.0</Version>
+    <Product>Emberlight</Product>
+    <AssemblyTitle>Emberlight</AssemblyTitle>
+    <Description>Fast image browser and slideshow viewer - a Windows port of Phoenix Slides</Description>
+    <Company>Emberlight contributors</Company>
+    <Copyright>Windows port of Phoenix Slides by Dominic Yu (CC BY-NC-SA 2.0)</Copyright>
+
+    <!-- Publishing: WPF's localized resource folders are not needed -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Emberlight.Core\Emberlight.Core.csproj" />
+  </ItemGroup>
+
+</Project>
