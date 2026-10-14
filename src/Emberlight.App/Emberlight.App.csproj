@@ -24,6 +24,9 @@
 
     <!-- Publishing: WPF's localized resource folders are not needed -->
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+
+    <!-- Application.ThemeMode (the Fluent theme, which follows dark mode) is still marked experimental in .NET 10 -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

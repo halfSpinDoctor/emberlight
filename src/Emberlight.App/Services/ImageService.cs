@@ -29,7 +29,54 @@ public static class ImageService
     public static void InitPlaceholders()
     {
         BrokenPlaceholder = MakePlaceholder("\u2715");
-        LoadingPlaceholder = MakePlaceholder("\u2026");
+        LoadingPlaceholder = MakeIconPlaceholder() ?? MakePlaceholder("\u2026");
+    }
+
+    /// <summary>
+    /// The app icon as a square tile, shown while a thumbnail loads. The icon's own rounded corners are transparent,
+    /// so the tile paints the icon's background gradient edge to edge first: the corners then come out square.
+    /// Null if the icon can't be read (the caller falls back to the drawn placeholder).
+    /// </summary>
+    /// <summary>
+    /// The largest image in the app icon (256 px), or null if it can't be read. Use this rather than pointing an
+    /// Image at app.ico: WPF then shows the icon's first frame, the 16 px one, scaled up and blocky.
+    /// </summary>
+    public static BitmapSource? LoadLargestAppIcon()
+    {
+        try
+        {
+            var decoder = BitmapDecoder.Create(new Uri("pack://application:,,,/Emberlight;component/Assets/app.ico"),
+                BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+            var frame = decoder.Frames.OrderByDescending(f => f.PixelWidth).First();
+            frame.Freeze();
+            return frame;
+        }
+        catch (Exception) { return null; }
+    }
+
+    private static BitmapSource? MakeIconPlaceholder()
+    {
+        var icon = LoadLargestAppIcon();
+        if (icon is not { PixelWidth: 256 }) return null;    // the geometry below is for the 256 px frame
+
+        // In the 256 px frame the rounded square spans pixels 6..250; its vertical gradient runs between these
+        // colours (sampled from the icon, identical at the left and right edges).
+        const int inset = 6, side = 256 - 2 * inset;
+        var gradient = new LinearGradientBrush(Color.FromRgb(0xFE, 0xAC, 0x2D), Color.FromRgb(0xD6, 0x32, 0x26), 90);
+        var dv = new DrawingVisual();
+        using (var dc = dv.RenderOpen())
+        {
+            dc.DrawRectangle(gradient, null, new Rect(0, 0, side, side));
+            // The icon's rounded edge has a 1-2 px lighter rim that would show as faint arcs at the new square
+            // corners, so only its interior is drawn: a circular clip 3 px in, which stays inside its squircle corners.
+            dc.PushClip(new RectangleGeometry(new Rect(3, 3, side - 6, side - 6), 44, 44));
+            dc.DrawImage(icon, new Rect(-inset, -inset, 256, 256));
+            dc.Pop();
+        }
+        var rtb = new RenderTargetBitmap(side, side, 96, 96, PixelFormats.Pbgra32);
+        rtb.Render(dv);
+        rtb.Freeze();
+        return rtb;
     }
 
     // ---- sizes ----------------------------------------------------------------------------
@@ -175,10 +222,10 @@ public static class ImageService
         var dv = new DrawingVisual();
         using (var dc = dv.RenderOpen())
         {
-            dc.DrawRoundedRectangle(
+            dc.DrawRectangle(
                 new SolidColorBrush(Color.FromRgb(0xEC, 0xEC, 0xEC)),
                 new Pen(new SolidColorBrush(Color.FromRgb(0xBC, 0xBC, 0xBC)), 2),
-                new Rect(6, 6, 148, 108), 8, 8);
+                new Rect(6, 6, 148, 108));
             var text = new FormattedText(glyph, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
                 new Typeface("Segoe UI"), 44, Brushes.Gray, 1.0);
             dc.DrawText(text, new Point(80 - text.Width / 2, 60 - text.Height / 2));

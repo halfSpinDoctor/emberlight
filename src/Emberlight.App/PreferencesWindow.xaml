@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Icon="Assets/app.ico"
         Title="Preferences" Width="560" Height="640" ShowInTaskbar="False"
-        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="{DynamicResource ApplicationBackgroundBrush}">
     <DockPanel Margin="12">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
             <Button Content="OK" Width="84" IsDefault="True" Click="OnOk" Margin="0,0,8,0"/>
@@ -99,7 +100,7 @@
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Behind transparent pictures:" VerticalAlignment="Center" Margin="0,0,10,0"/>
                         <TextBox Grid.Row="1" Grid.Column="1" x:Name="TransparentColor"/>
                         <TextBlock Grid.Row="0" Grid.Column="2" Grid.RowSpan="2" Margin="10,0,0,0" VerticalAlignment="Center"
-                                   Foreground="Gray" Text="e.g. #000000 or #00000000"/>
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" Text="e.g. #000000 or #00000000"/>
                     </Grid>
                 </StackPanel>
             </TabItem>

@@ -3,16 +3,23 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:Emberlight.App.ViewModels"
         xmlns:ctl="clr-namespace:Emberlight.App.Controls"
+        xmlns:sys="clr-namespace:System;assembly=mscorlib"
         Icon="Assets/app.ico"
         Title="Emberlight" Width="1100" Height="720" MinWidth="560" MinHeight="360"
+        Background="{DynamicResource ApplicationBackgroundBrush}"
         AllowDrop="True" DragEnter="OnDragOver" DragOver="OnDragOver" Drop="OnDrop">
+    <!-- A solid, neutral background rather than Fluent's translucent Mica: the desktop wallpaper tinting the window
+         would skew how photos look. -->
 
     <Window.Resources>
-        <!-- Zero padding/border so every cell is exactly CellWidth + 2*margin wide; the visible-range
-             maths in ThumbnailGridMath relies on that. -->
-        <Style x:Key="ThumbContainerStyle" TargetType="ListBoxItem">
+        <!-- Zero padding/border/minimum size so every cell is exactly CellWidth + 2*margin wide; the visible-range
+             maths in ThumbnailGridMath relies on that. Based on the theme's own style (Fluent), which otherwise
+             adds padding and a minimum height. -->
+        <Style x:Key="ThumbContainerStyle" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
             <Setter Property="Padding" Value="0"/>
             <Setter Property="Margin" Value="0"/>
+            <Setter Property="MinWidth" Value="0"/>
+            <Setter Property="MinHeight" Value="0"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
             <Setter Property="VerticalContentAlignment" Value="Stretch"/>
@@ -36,7 +43,16 @@
 
     <DockPanel>
         <!-- ============================ menu ============================ -->
-        <Menu DockPanel.Dock="Top">
+        <Menu DockPanel.Dock="Top" FontSize="12">
+            <Menu.Resources>
+                <!-- Compact menus, matching the folder tree's 12 px text: Fluent's are 14 px text with a 49 px menu bar
+                     and 36 px items. Applies to the drop-downs too, including the Sort By items created in code.
+                     Fluent's templates hard-code their spacing, so OnMenuItemLoaded tightens it. -->
+                <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                    <Setter Property="FontSize" Value="12"/>
+                    <EventSetter Event="Loaded" Handler="OnMenuItemLoaded"/>
+                </Style>
+            </Menu.Resources>
             <MenuItem Header="_File">
                 <MenuItem Header="_Open Folder..." InputGestureText="Ctrl+O" Click="OnOpenFolder"/>
                 <Separator/>
@@ -84,7 +100,32 @@
         </Menu>
 
         <!-- =========================== status bar =========================== -->
-        <StatusBar DockPanel.Dock="Bottom">
+        <StatusBar DockPanel.Dock="Bottom" Padding="6,0">
+            <StatusBar.Resources>
+                <!-- Compact controls: Fluent gives checkboxes a 120 px minimum width and most controls a 32 px minimum
+                     height, which made the status bar tall and spread the checkboxes apart. -->
+                <Style TargetType="StatusBarItem" BasedOn="{StaticResource {x:Type StatusBarItem}}">
+                    <Setter Property="Padding" Value="4,2"/>
+                    <Setter Property="MinHeight" Value="0"/>
+                </Style>
+                <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+                    <Setter Property="MinWidth" Value="0"/>
+                    <Setter Property="MinHeight" Value="0"/>
+                    <Setter Property="VerticalContentAlignment" Value="Center"/>   <!-- line the labels up with "Size" -->
+                    <Setter Property="Padding" Value="6,0,0,0"/>
+                </Style>
+                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                    <Setter Property="MinHeight" Value="0"/>
+                </Style>
+                <Style TargetType="Slider" BasedOn="{StaticResource {x:Type Slider}}">
+                    <Setter Property="MinHeight" Value="0"/>
+                    <Setter Property="Height" Value="30"/>     <!-- Fluent's is 32; any shorter and the bottom of the thumb clips -->
+                    <!-- Fluent draws the track a little below the slider's middle; lift it level with the labels -->
+                    <Setter Property="RenderTransform">
+                        <Setter.Value><TranslateTransform Y="-1"/></Setter.Value>
+                    </Setter>
+                </Style>
+            </StatusBar.Resources>
             <StatusBarItem DockPanel.Dock="Right">
                 <StackPanel Orientation="Horizontal">
                     <Button x:Name="SlideshowButton" Content="Slideshow" Padding="14,1" Margin="0,0,16,0"
@@ -121,7 +162,20 @@
 
             <TreeView x:Name="FolderTree" Grid.Column="0" BorderThickness="0,0,1,0"
                       SelectedItemChanged="OnFolderSelected"
-                      PreviewMouseLeftButtonDown="OnTreePreviewMouseDown"/>
+                      PreviewMouseLeftButtonDown="OnTreePreviewMouseDown">
+                <TreeView.Resources>
+                    <!-- Compact rows: Fluent's defaults are 14 px text in 28 px rows. The tree items are created in
+                         code, so these apply through resource lookup. -->
+                    <sys:Double x:Key="TreeViewItemFontSize">12</sys:Double>
+                    <Thickness x:Key="TreeViewItemPresenterPadding">0</Thickness>
+                    <Thickness x:Key="TreeViewItemPresenterMargin">0</Thickness>
+                    <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+                        <Setter Property="FontSize" Value="12"/>
+                        <Setter Property="MinHeight" Value="0"/>
+                        <Setter Property="Padding" Value="2,1"/>
+                    </Style>
+                </TreeView.Resources>
+            </TreeView>
 
             <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                           Background="Transparent" ResizeBehavior="PreviousAndNext"/>
@@ -146,7 +200,7 @@
                 </ListBox.ItemsPanel>
             </ListBox>
 
-            <Border x:Name="InfoPanel" Grid.Column="3" BorderBrush="#FFD0D0D0" BorderThickness="1,0,0,0"
+            <Border x:Name="InfoPanel" Grid.Column="3" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}" BorderThickness="1,0,0,0"
                     Visibility="Collapsed">
                 <DockPanel>
                     <TextBlock x:Name="InfoHeader" DockPanel.Dock="Top" FontWeight="SemiBold" Margin="10,10,10,4"

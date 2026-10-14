@@ -3,13 +3,15 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Icon="Assets/app.ico"
         Title="About Emberlight" Width="460" SizeToContent="Height" ShowInTaskbar="False"
-        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="{DynamicResource ApplicationBackgroundBrush}">
     <StackPanel Margin="20,16,20,14">
         <DockPanel>
-            <Image Source="Assets/app.ico" Width="48" Height="48" Margin="0,0,14,0" DockPanel.Dock="Left"/>
+            <Image x:Name="AppIcon" Source="Assets/app.ico" Width="48" Height="48" Margin="0,0,14,0" DockPanel.Dock="Left"
+                   RenderOptions.BitmapScalingMode="HighQuality"/>
             <StackPanel VerticalAlignment="Center">
                 <TextBlock Text="Emberlight" FontSize="20" FontWeight="SemiBold"/>
-                <TextBlock x:Name="VersionText" Foreground="#666" Margin="0,2,0,0"/>
+                <TextBlock x:Name="VersionText" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,2,0,0"/>
             </StackPanel>
         </DockPanel>
 
@@ -25,7 +27,7 @@
             <Hyperlink NavigateUri="https://github.com/halfSpinDoctor/emberlight" RequestNavigate="OnLink">github.com/halfSpinDoctor/emberlight</Hyperlink>
         </TextBlock>
 
-        <TextBlock TextWrapping="Wrap" Margin="0,12,0,0" Foreground="#666">
+        <TextBlock TextWrapping="Wrap" Margin="0,12,0,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}">
             Licensed under Creative Commons Attribution-NonCommercial-ShareAlike 2.0. See LICENSE-NOTICE.md.
         </TextBlock>
 

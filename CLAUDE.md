@@ -94,6 +94,10 @@ are timing based and could be flaky on a loaded CI machine.
 - **"Open with" / files on the command line:** start a slideshow (if the preference is on) with the browser opened
   behind it at that folder (`MainWindow.ShowSlideshow`), so quitting the slideshow returns to the browser with the
   last-viewed image selected instead of exiting the app.
+- **Theme:** WPF's Fluent theme (`ThemeMode="System"` in `App.xaml`) follows the Windows light/dark setting and accent
+  colour. The API is still experimental in .NET 10 (warning WPF0001, suppressed in the App `.csproj`). Windows use the
+  solid `ApplicationBackgroundBrush` rather than Fluent's translucent Mica (wallpaper tint would skew photos). The
+  slideshow window stays black by design.
 - "Rotate" in the browser edits the EXIF orientation tag only (lossless); there is no pixel rotation.
 
 ## Gotchas learned the hard way
@@ -105,6 +109,22 @@ are timing based and could be flaky on a loaded CI machine.
 - `FileSystemWatcher` doesn't reliably report the watched folder itself being deleted, hence `FolderWatcher` polls.
 - With a non-virtualizing list, adding thousands of items freezes WPF (all containers are measured in one pass).
 - Slideshow key bindings assume a US keyboard layout.
+- The thumbnail loading placeholder is the app icon with square corners (`ImageService.MakeIconPlaceholder`): it paints
+  the icon's gradient (colours sampled from `app.ico`) and draws the icon clipped inside its rounded rim. If the icon
+  artwork changes, re-sample those colours; if `app.ico` loses its 256 px frame, the old grey placeholder is used.
+- Fluent theme: a custom `Style` must use `BasedOn="{StaticResource {x:Type ...}}"`, or it silently falls back to the
+  classic look. Don't hard-code UI colours; use Fluent brushes such as `TextFillColorSecondaryBrush` or
+  `DividerStrokeColorDefaultBrush` so both light and dark work. Fluent list items have a minimum height and padding:
+  `ThumbContainerStyle` resets them, because the grid maths needs exact cell sizes. The status bar has compact styles
+  in `StatusBar.Resources` (no 120 px checkbox minimum width or 32 px minimum heights; slider 30 px tall, since any
+  shorter clips the bottom of its thumb, and lifted 1 px so the track lines up with the labels); it is 36 px tall instead
+  of Fluent's 66. If the slider height changes, re-measure the lift: it depends on the height.
+  The folder tree is compact too (`TreeView.Resources`): 12 px text and 22 px rows instead of 14 px and ~31 px.
+  Menus likewise: 12 px text, a 30 px menu bar and 24 px items instead of 49 and 36. Fluent's menu templates hard-code
+  their margins (padding only adds to them), so `OnMenuItemLoaded` shrinks the named template parts (`Border`, its
+  content grid, `CheckBoxIconBorder`) when each item loads; it does nothing if a future template renames them.
+- `TreeViewItem.BringIntoView()` right after adding rows does nothing useful (they aren't laid out yet); defer it with
+  `Dispatcher.BeginInvoke(DispatcherPriority.Loaded, ...)`, as `SelectPathInTreeAsync` does.
 
 ## Not ported / ideas
 Lossless pixel rotation (jpegtran), RAW (dcraw), update checker, F1-F12 slide categories, Finder alias

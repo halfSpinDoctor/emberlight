@@ -1,6 +1,9 @@
 <Application x:Class="Emberlight.App.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ThemeMode="System">
+    <!-- ThemeMode: WPF's Fluent (Windows 11) theme, following the system light/dark setting and accent colour.
+         Brushes named like TextFillColorSecondaryBrush come from it. -->
     <Application.Resources>
     </Application.Resources>
 </Application>

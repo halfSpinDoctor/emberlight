@@ -324,7 +324,10 @@ public partial class MainWindow : Window
         _suppressTreeNav = true;
         try { current.IsSelected = true; }
         finally { _suppressTreeNav = false; }
-        current.BringIntoView();
+        // The rows above it were only just added and haven't been laid out, so scrolling now would use stale
+        // positions; wait for layout first.
+        var target = current;
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => target.BringIntoView());
     }
 
     /// <summary>
@@ -502,6 +505,26 @@ public partial class MainWindow : Window
         BusyBar.Maximum = Math.Max(1, total);
         BusyBar.Value = done;
         StatusText.Text = message;
+    }
+
+    /// <summary>
+    /// Tightens Fluent's menu item spacing, which its templates hard-code (a 10 px margin around menu bar headers,
+    /// 8x6 px inside drop-down items, a 20 px check box square). Looks the template parts up by name; if a future
+    /// Fluent template renames them, that item just keeps the default spacing.
+    /// </summary>
+    private void OnMenuItemLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem item || item.Template is not { } template) return;
+        bool onMenuBar = item.Role is MenuItemRole.TopLevelHeader or MenuItemRole.TopLevelItem;
+        if (template.FindName("Border", item) is not Border border) return;
+
+        border.Margin = onMenuBar ? new Thickness(2) : new Thickness(4, 0, 4, 0);
+        // The content grid is the border's child, or (menu bar headers with a drop-down) that grid's first child.
+        var content = border.Child as Grid;
+        if (content is { Margin.Top: 0 } && content.Children.Count > 0 && content.Children[0] is Grid inner) content = inner;
+        if (content != null) content.Margin = onMenuBar ? new Thickness(8, 4, 8, 4) : new Thickness(8, 3, 8, 3);
+
+        if (template.FindName("CheckBoxIconBorder", item) is Border check) check.Width = check.Height = 16;
     }
 
     /// <summary>
