@@ -308,6 +308,16 @@ Slideshow navigation logic: current slide, looping, random order, auto-advance, 
 - **CurrentChanged fires on navigation**: The "current slide changed" event fires on each real move, but not on a
   blocked one.
 
+### WheelStepper
+The mouse wheel in the slideshow: one notch moves one slide.
+
+- **one notch is one slide: up = back, down = forward**: A 120-unit notch up goes back one slide, down goes forward,
+  and a 240-unit event (fast spin) moves two.
+- **small touchpad steps add up to a notch**: Precision-touchpad steps of 30 add up; 330 units give two slides and the
+  remainder carries over.
+- **reversing direction or resetting drops partial movement**: A partial scroll is forgotten when the direction
+  reverses or the stepper is reset; zero does nothing.
+
 ---
 
 ## ViewTests.cs

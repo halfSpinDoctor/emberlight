@@ -51,6 +51,8 @@ The core tests also run on Linux/macOS.
   screen; turning it on keeps that slide and reshuffles the rest. A short on-screen message confirms the change. It
   affects only the running slideshow, not the saved setting.
 * **Quit a slideshow** with `Q`, `Esc` or `.`.
+* **Mouse wheel in the slideshow** - wheel up for the previous slide, down for the next (one slide per notch; touchpad
+  scrolling adds up to a notch). `Ctrl`+wheel still zooms, and a zoomed-in picture still pans with the wheel.
 * **Next / previous folder in the slideshow** - `Ctrl+Right` / `Ctrl+Left` jump to the next or previous folder at the
   same level of the tree (siblings, in the folder tree's natural name order). Folders without images are skipped,
   there is no wrap-around (a beep and a short message at the ends), and a shuffled slideshow stays shuffled. The folder

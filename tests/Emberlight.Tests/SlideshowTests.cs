@@ -220,5 +220,37 @@ internal static class SlideshowTests
             s.Jump(-1); // blocked: no change
             T.Eq(3, n);
         });
+
+        WheelTests();
+    }
+
+    static void WheelTests()
+    {
+        T.Group("WheelStepper");
+        T.Run("one notch is one slide: up = back, down = forward", () =>
+        {
+            var w = new WheelStepper();
+            T.Eq(-1, w.Add(120));
+            T.Eq(1, w.Add(-120));
+            T.Eq(-2, w.Add(240), "a fast spin reported as one event");
+        });
+        T.Run("small touchpad steps add up to a notch", () =>
+        {
+            var w = new WheelStepper();
+            int total = 0;
+            for (int i = 0; i < 11; i++) total += w.Add(-30);     // 330 units: two notches plus a remainder
+            T.Eq(2, total);
+            T.Eq(1, w.Add(-30), "the remainder carries over to the next notch");
+        });
+        T.Run("reversing direction or resetting drops partial movement", () =>
+        {
+            var w = new WheelStepper();
+            T.Eq(0, w.Add(-90));
+            T.Eq(0, w.Add(60), "turned back: starts again from zero");
+            T.Eq(-1, w.Add(60));
+            T.Eq(0, w.Add(-100)); w.Reset();
+            T.Eq(0, w.Add(-100), "reset forgot the earlier 100");
+            T.Eq(0, w.Add(0));
+        });
     }
 }

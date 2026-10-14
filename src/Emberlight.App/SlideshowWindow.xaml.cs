@@ -43,11 +43,12 @@ public partial class SlideshowWindow : Window
         "S                        random order on / off (reshuffles when turned on)\n" +
         "H  ?                     this help        Q  Esc  .  quit\n" +
         "\n" +
-        "Mouse: click = next, double-click = quit, drag = pan when zoomed,\n" +
-        "       Ctrl+wheel = zoom";
+        "Mouse: click = next, double-click = quit, wheel = previous / next,\n" +
+        "       Ctrl+wheel = zoom, drag or wheel = pan when zoomed";
 
     private readonly AppSettings _settings;
     private readonly SlideshowState _state;
+    private readonly WheelStepper _wheel = new();      // mouse wheel: one notch = one slide
     private readonly DispatcherTimer _timer = new();
     private readonly LruCache<string, LoadedImage> _cache = new(5, comparer: StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _preloading = new(StringComparer.OrdinalIgnoreCase);
@@ -353,6 +354,19 @@ public partial class SlideshowWindow : Window
     // ============================================================================================
     // Keyboard
     // ============================================================================================
+
+    /// <summary>
+    /// Wheel up = previous slide, wheel down = next. The viewer sees the wheel first and keeps it for Ctrl+wheel
+    /// zoom and for panning a zoomed-in picture; only what it leaves unhandled changes the slide.
+    /// </summary>
+    protected override void OnMouseWheel(MouseWheelEventArgs e)
+    {
+        base.OnMouseWheel(e);
+        if (e.Handled) return;
+        int steps = _wheel.Add(e.Delta);
+        if (steps != 0) Navigate(() => _state.Jump(steps));
+        e.Handled = true;
+    }
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {

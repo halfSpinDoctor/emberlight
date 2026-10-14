@@ -48,7 +48,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~150 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~153 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.
@@ -91,6 +91,8 @@ are timing based and could be flaky on a loaded CI machine.
   keyboard navigation neither auto-expands nor auto-collapses.
 - **Slideshow `S`:** toggles random for the *running* slideshow only (does not change the saved setting). Off = continue in
   sort order from the current slide; on = current slide first, rest reshuffled. Shows a toast. Quit keys: `Q`, `Esc`, `.`.
+- **Slideshow mouse wheel:** up = previous slide, down = next, one slide per notch (`WheelStepper` adds up touchpad
+  steps). Ctrl+wheel zooms, and a zoomed-in picture pans with the wheel instead (the viewer handles those first).
 - **"Open with" / files on the command line:** start a slideshow (if the preference is on) with the browser opened
   behind it at that folder (`MainWindow.ShowSlideshow`), so quitting the slideshow returns to the browser with the
   last-viewed image selected instead of exiting the app.
@@ -123,6 +125,12 @@ are timing based and could be flaky on a loaded CI machine.
   Menus likewise: 12 px text, a 30 px menu bar and 24 px items instead of 49 and 36. Fluent's menu templates hard-code
   their margins (padding only adds to them), so `OnMenuItemLoaded` shrinks the named template parts (`Border`, its
   content grid, `CheckBoxIconBorder`) when each item loads; it does nothing if a future template renames them.
+  It also fixes the check box column at 22 px in every drop-down (Fluent sizes it per menu, to zero without toggles),
+  indents submenu headers (Sort By) to match, and shows the Sort By direction arrow in that column: the arrow is the
+  sort item's `Icon` (set in `SyncMenuState`), bound into the template's `CheckBoxIcon`.
+  Preferences uses 12 px text too, with slimmer fields and 13 px group headings (styles in `PreferencesWindow.xaml`'s
+  resources), but check box and radio rows keep Fluent's 32 px height: the user found tighter rows too cramped. The
+  window is 520 x 540 (was 560 x 640), sized to the tallest tab (Slideshow); if a tab gains rows, check it still fits.
 - `TreeViewItem.BringIntoView()` right after adding rows does nothing useful (they aren't laid out yet); defer it with
   `Dispatcher.BeginInvoke(DispatcherPriority.Loaded, ...)`, as `SelectPathInTreeAsync` does.
 

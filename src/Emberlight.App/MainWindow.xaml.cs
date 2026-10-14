@@ -522,9 +522,34 @@ public partial class MainWindow : Window
         // The content grid is the border's child, or (menu bar headers with a drop-down) that grid's first child.
         var content = border.Child as Grid;
         if (content is { Margin.Top: 0 } && content.Children.Count > 0 && content.Children[0] is Grid inner) content = inner;
-        if (content != null) content.Margin = onMenuBar ? new Thickness(8, 4, 8, 4) : new Thickness(8, 3, 8, 3);
+        // Every drop-down indents its text by a check box column (16 px square + 6 px gap). Fluent sizes that column
+        // per menu, and to zero in menus without toggles, so it is fixed here instead; items that open a submenu
+        // (Sort By) have no such column and get the same amount as a margin.
+        const double checkColumn = 16 + 6;
+        double left = item.Role == MenuItemRole.SubmenuHeader ? 8 + checkColumn : 8;
+        if (content != null) content.Margin = onMenuBar ? new Thickness(8, 4, 8, 4) : new Thickness(left, 3, 8, 3);
+        if (item.Role == MenuItemRole.SubmenuItem && content is { ColumnDefinitions.Count: 4 })
+        {
+            content.ColumnDefinitions[0].SharedSizeGroup = null;
+            content.ColumnDefinitions[0].Width = new GridLength(checkColumn);
+        }
 
-        if (template.FindName("CheckBoxIconBorder", item) is Border check) check.Width = check.Height = 16;
+        if (template.FindName("CheckBoxIconBorder", item) is not Border check) return;
+        check.Width = check.Height = 16;
+
+        // Sort By items: the sort direction arrow (carried in the item's Icon, see SyncMenuState) goes in the check
+        // box column instead of the icon column after it.
+        if (item.Tag is SortField && template.FindName("CheckBoxIcon", item) is TextBlock glyph
+            && template.FindName("Icon", item) is ContentPresenter iconColumn)
+        {
+            check.Visibility = Visibility.Visible;
+            check.BorderThickness = new Thickness(0);
+            check.Background = Brushes.Transparent;
+            glyph.FontFamily = FontFamily;                 // Fluent's symbol font has no triangles
+            glyph.FontSize = 10;
+            glyph.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding(nameof(MenuItem.Icon)) { Source = item });
+            iconColumn.Visibility = Visibility.Collapsed;
+        }
     }
 
     /// <summary>
@@ -729,7 +754,9 @@ public partial class MainWindow : Window
             string label = SortChoices.First(c => c.Field == field).Label;
             bool active = field == _sortOrder.Key;
             mi.IsChecked = active;
-            mi.Header = active ? label + (_sortOrder.Descending ? "  \u25BC" : "  \u25B2") : label;
+            mi.Header = label;
+            // The direction arrow; OnMenuItemLoaded shows it to the left of the label, in the check box column.
+            mi.Icon = active ? (_sortOrder.Descending ? "\u25BC" : "\u25B2") : null;
         }
         MenuShowFilenames.IsChecked = _view.ShowFilenames;
         MenuSubfolders.IsChecked = _settings.IncludeSubfolders;
