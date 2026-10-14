@@ -11,6 +11,7 @@ internal static class CoreTests
         ListExtensionTests();
         NaturalComparerTests();
         FileSizeTests();
+        BuildVersionTests();
         OrientationTests();
         LruTests();
         FileTypeTests();
@@ -285,6 +286,40 @@ internal static class CoreTests
     }
 
     // ------------------------------------------------------------------------------------------
+    static void BuildVersionTests()
+    {
+        T.Group("BuildVersion");
+        const string sha = "E707B9E1234567890abcdef1234567890abcdef0";
+        T.Run("splits the SDK's version+commit string", () =>
+        {
+            var v = BuildVersion.Parse("0.1.0+" + sha);
+            T.Eq("0.1.0", v.Version);
+            T.Eq(sha.ToLowerInvariant(), v.Commit);
+            T.Eq("e707b9e", v.ShortCommit);
+            T.Eq("0.1.0 (commit e707b9e)", v.ToString());
+        });
+        T.Run("plain version has no commit", () =>
+        {
+            var v = BuildVersion.Parse("0.2.0-beta");
+            T.Eq("0.2.0-beta", v.Version);
+            T.Eq(null, v.Commit);
+            T.Eq("0.2.0-beta", v.ToString());
+        });
+        T.Run("commit is the last part of multi-part build metadata", () =>
+        {
+            T.Eq("abcdef1", BuildVersion.Parse("1.0.0+ci.42.abcdef1234").ShortCommit);
+        });
+        T.Run("non-hex or empty metadata and missing input are handled", () =>
+        {
+            T.Eq(null, BuildVersion.Parse("1.0.0+local").Commit);
+            T.Eq(null, BuildVersion.Parse("1.0.0+").Commit);
+            T.Eq("unknown", BuildVersion.Parse(null).Version);
+            T.Eq("unknown", BuildVersion.Parse("  ").Version);
+            T.Eq("unknown", BuildVersion.Parse("+" + sha).Version);
+        });
+    }
+
+    // ------------------------------------------------------------------------------------------
     static void OrientationTests()
     {
         T.Group("ImageOrientation");
@@ -466,6 +501,8 @@ internal static class CoreTests
             T.True(s.ShowFilenames && s.AutoRotateByOrientationTag && s.RerandomizeOnLoop && s.OpenFilesDoSlideshow);
             T.True(!s.SlideshowLoop && !s.SlideshowRandom && !s.SlideshowAutoAdvance);
             T.Eq(new SortOrder(SortField.Name, false), s.SortOrder);
+            T.Eq(SubfolderMode.ResetOnNewTree, s.IncludeSubfoldersMode, "the behaviour before this setting existed");
+            T.True(!s.IncludeSubfolders && !s.InfoPanelMoreExif);
         });
         T.Run("sort order legacy encoding round-trips", () =>
         {
@@ -481,7 +518,8 @@ internal static class CoreTests
         {
             using var d = new TempDir();
             string p = d.File("sub/settings.json");
-            var s = new AppSettings { ThumbCellWidth = 200, LastFolderPath = @"C:\Pics", SlideshowLoop = true };
+            var s = new AppSettings { ThumbCellWidth = 200, LastFolderPath = @"C:\Pics", SlideshowLoop = true,
+                                      IncludeSubfoldersMode = SubfolderMode.Always, InfoPanelMoreExif = true };
             s.SortOrder = new SortOrder(SortField.Size, true);
             s.IgnoredFileTypes.Add(".bmp");
             T.True(SettingsStore.Save(s, p));
@@ -490,6 +528,7 @@ internal static class CoreTests
             T.Eq(200.0, l.ThumbCellWidth); T.Eq(@"C:\Pics", l.LastFolderPath); T.True(l.SlideshowLoop);
             T.Eq(new SortOrder(SortField.Size, true), l.SortOrder);
             T.SeqEq(new[] { ".bmp" }, l.IgnoredFileTypes);
+            T.Eq(SubfolderMode.Always, l.IncludeSubfoldersMode); T.True(l.InfoPanelMoreExif);
         });
         T.Run("settings from the old app name are copied across once, and never overwrite newer ones", () =>
         {
@@ -523,11 +562,12 @@ internal static class CoreTests
             T.Eq(120.0, SettingsStore.Load(d.File("bad.json")).ThumbCellWidth);
             File.WriteAllText(d.File("null.json"), "null");
             T.Eq(120.0, SettingsStore.Load(d.File("null.json")).ThumbCellWidth);
-            File.WriteAllText(d.File("wild.json"), "{\"ThumbCellWidth\": 99999, \"SlideshowAutoAdvanceSeconds\": -3, \"SortBy\": 42, \"MaxThumbsToLoad\": 0, \"IgnoredFileTypes\": null}");
+            File.WriteAllText(d.File("wild.json"), "{\"ThumbCellWidth\": 99999, \"SlideshowAutoAdvanceSeconds\": -3, \"SortBy\": 42, \"MaxThumbsToLoad\": 0, \"IgnoredFileTypes\": null, \"IncludeSubfoldersMode\": 7}");
             var s = SettingsStore.Load(d.File("wild.json"));
             T.Eq(AppSettings.MaxThumbCellWidth, s.ThumbCellWidth);
             T.Eq(5.5, s.SlideshowAutoAdvanceSeconds);
             T.Eq(1, s.SortBy); T.Eq(1, s.MaxThumbsToLoad); T.True(s.IgnoredFileTypes != null);
+            T.Eq(SubfolderMode.ResetOnNewTree, s.IncludeSubfoldersMode, "unknown mode");
         });
     }
 }

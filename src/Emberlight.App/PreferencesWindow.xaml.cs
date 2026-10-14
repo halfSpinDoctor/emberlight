@@ -29,11 +29,24 @@ public partial class PreferencesWindow : Window
         PicturesPath.Text = string.IsNullOrWhiteSpace(settings.PicturesFolderPath)
             ? Environment.GetFolderPath(Environment.SpecialFolder.MyPictures)
             : settings.PicturesFolderPath;
-        ShowFilenames.IsChecked = settings.ShowFilenames;
         AutoRotate.IsChecked = settings.AutoRotateByOrientationTag;
         PreserveModDate.IsChecked = settings.PreserveModifiedDateOnEdit;
         OpenDoSlideshow.IsChecked = settings.OpenFilesDoSlideshow;
         OpenSubfolders.IsChecked = settings.StartupSlideshowSubfolders;
+
+        foreach (var (field, label) in MainWindow.SortChoices)
+        {
+            var choice = new ComboBoxItem { Content = label, Tag = field };
+            SortFieldBox.Items.Add(choice);
+            if (field == settings.SortOrder.Key) SortFieldBox.SelectedItem = choice;
+        }
+        SortDescendingBox.IsChecked = settings.SortOrder.Descending;
+        ShowFilenames.IsChecked = settings.ShowFilenames;
+        IncludeSubfolders.IsChecked = settings.IncludeSubfolders;
+        SubfoldersAlways.IsChecked = settings.IncludeSubfoldersMode == SubfolderMode.Always;
+        SubfoldersReset.IsChecked = settings.IncludeSubfoldersMode == SubfolderMode.ResetOnNewTree;
+        InfoPanel.IsChecked = settings.InfoPanelVisible;
+        MoreExif.IsChecked = settings.InfoPanelMoreExif;
 
         FullScreen.IsChecked = settings.SlideshowDefaultFullScreen;
         AutoAdvance.IsChecked = settings.SlideshowAutoAdvance;
@@ -86,11 +99,18 @@ public partial class PreferencesWindow : Window
 
         _settings.StartupOption = StartPictures.IsChecked == true ? StartupFolder.PicturesFolder : StartupFolder.LastFolder;
         _settings.PicturesFolderPath = PicturesPath.Text.Trim();
-        _settings.ShowFilenames = ShowFilenames.IsChecked == true;
         _settings.AutoRotateByOrientationTag = AutoRotate.IsChecked == true;
         _settings.PreserveModifiedDateOnEdit = PreserveModDate.IsChecked == true;
         _settings.OpenFilesDoSlideshow = OpenDoSlideshow.IsChecked == true;
         _settings.StartupSlideshowSubfolders = OpenSubfolders.IsChecked == true;
+
+        if (SortFieldBox.SelectedItem is ComboBoxItem { Tag: SortField field })
+            _settings.SortOrder = new SortOrder(field, SortDescendingBox.IsChecked == true);
+        _settings.ShowFilenames = ShowFilenames.IsChecked == true;
+        _settings.IncludeSubfolders = IncludeSubfolders.IsChecked == true;
+        _settings.IncludeSubfoldersMode = SubfoldersAlways.IsChecked == true ? SubfolderMode.Always : SubfolderMode.ResetOnNewTree;
+        _settings.InfoPanelVisible = InfoPanel.IsChecked == true;
+        _settings.InfoPanelMoreExif = MoreExif.IsChecked == true;
 
         _settings.SlideshowDefaultFullScreen = FullScreen.IsChecked == true;
         _settings.SlideshowAutoAdvance = AutoAdvance.IsChecked == true;

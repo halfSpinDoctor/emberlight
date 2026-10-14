@@ -66,6 +66,16 @@ The "img2 before img10" ordering used for file and folder names.
 - **terabytes are scaled correctly (original mislabelled these)**: Terabyte values are scaled correctly, fixing a
   labelling bug in the original.
 
+### BuildVersion
+Splits the version string the .NET SDK stamps into the app ("0.1.0+<commit hash>") for Help > About.
+
+- **splits the SDK's version+commit string**: Gives the version, the full lowercase hash, a 7-character short hash,
+  and "0.1.0 (commit e707b9e)" as the display text.
+- **plain version has no commit**: A version without `+` metadata (e.g. built outside git) shows just the version.
+- **commit is the last part of multi-part build metadata**: With `+ci.42.<hash>`, the hash is still found.
+- **non-hex or empty metadata and missing input are handled**: Metadata that isn't a hash gives no commit; a null,
+  blank or version-less string shows "unknown".
+
 ### ImageOrientation
 EXIF orientation values 1-8, modelled as a flip plus a rotation.
 
@@ -97,17 +107,18 @@ EXIF orientation values 1-8, modelled as a flip plus a rotation.
 
 ### Settings
 - **defaults match the original app's registered defaults**: A fresh `AppSettings` starts with the same defaults as
-  Phoenix Slides (thumbnail size, slideshow timing, flags, sort order).
+  Phoenix Slides (thumbnail size, slideshow timing, flags, sort order). Include subfolders starts off and resets when
+  changing folder trees, and "More EXIF details" starts off.
 - **sort order legacy encoding round-trips**: The original's signed-integer sort code converts back and forth exactly,
   and unknown codes fall back to Name ascending.
-- **save and load round trip; no temp file left behind**: Saved settings load back unchanged, and the atomic save
-  leaves no `.tmp` file behind.
+- **save and load round trip; no temp file left behind**: Saved settings load back unchanged (including the
+  subfolder mode and "More EXIF details"), and the atomic save leaves no `.tmp` file behind.
 - **settings from the old app name are copied across once, and never overwrite newer ones**: Settings in the old
   `PhoenixSlides` folder are copied over once, the old file is kept, and the copy never overwrites newer settings.
 - **the legacy location is the old folder name and differs from the new one**: The old settings path uses
   `PhoenixSlides`, the new one uses `Emberlight`, and the two are different.
 - **missing, corrupt or hostile files fall back to sane values**: A missing file, invalid JSON, `null`, or values
-  out of range all give defaults or clamped values instead of crashing.
+  out of range (including an unknown subfolder mode) all give defaults or clamped values instead of crashing.
 
 ---
 
@@ -192,6 +203,26 @@ What to show when Emberlight is opened with command-line arguments (e.g. "Open w
   folders, and look-alike names such as `Pics2` next to `Pics` all count as outside.
 - **drive/filesystem roots work as tree roots; bad input never throws**: A drive root works as the top of a tree, and
   invalid or empty paths return false instead of throwing.
+- **network share roots get an Explorer-style label; other paths get none**: `\\truenas.local\photos` becomes
+  `photos (\\truenas.local)` in the folder tree (backslashes, forward slashes or a trailing separator all work); drive
+  paths, a bare server name, `\\?\` and `\\.\` device paths, and empty input give no label.
+- **subfolders stay on: inside the tree when resetting, anywhere when set to Always**: With "Reset when changing
+  folder trees", Include subfolders stays on only inside its tree (not in siblings or parents); with "Always" it
+  stays on everywhere.
+
+### ClickExpandTracker
+Folder-tree accordion: folders opened by clicking their name close again when another folder is clicked.
+
+- **clicking a sibling collapses the folder opened by the previous click**: Open Pics, click Docs: Pics is collapsed.
+- **clicking deeper keeps the ancestors open; clicking away collapses the whole chain, deepest first**: Opening
+  C > Pics > 2020 keeps all three; clicking Docs then collapses 2020 and Pics but keeps C, Docs' parent.
+- **clicking back up to an ancestor collapses what was opened below it**: From Pics > 2020, clicking Pics closes 2020.
+- **folders not opened by a click (arrow, keyboard, already open) are never collapsed**: Only folders that the click
+  itself opened are tracked.
+- **forgetting a folder (its arrow was used) keeps it open**: After `Forget`, the folder is no longer auto-collapsed;
+  `Clear` empties the tracker when the tree is rebuilt.
+- **nodes compare by identity: a shortcut to the same folder is a different node**: A ★ shortcut and the same folder
+  under its drive are tracked separately, and clicking one node twice tracks it once.
 
 ### DirectoryScanner progress
 Feeds the status-bar progress text while a large folder loads.
@@ -206,6 +237,9 @@ Slideshow Ctrl+Right / Ctrl+Left: jump to the next or previous sibling folder.
 
 - **siblings come back in natural name order, including the current folder**: Sibling folders are listed in natural
   name order, including the current folder and empty ones.
+- **subfolders (for the folder tree): natural order, folders only, hidden skipped, missing is empty**: The folder tree's
+  listing gives subfolders in natural name order, leaves out files and hidden folders, and returns an empty list for
+  a folder with no subfolders, a missing folder or an invalid path.
 - **next and previous skip folders that have no images**: Jumping forward or back skips sibling folders that contain
   no images.
 - **stops at the ends: no wrap-around**: There is no next folder after the last sibling and no previous folder before

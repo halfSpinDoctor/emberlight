@@ -57,7 +57,7 @@
             <MenuItem Header="_View">
                 <MenuItem x:Name="SortMenu" Header="_Sort By"/>
                 <MenuItem x:Name="MenuShowFilenames" Header="Show _Filenames" IsCheckable="True" Click="OnToggleFilenames"/>
-                <MenuItem x:Name="MenuSubfolders" Header="Include S_ubfolders" IsCheckable="True" Click="OnToggleSubfolders"/>
+                <MenuItem x:Name="MenuSubfolders" Header="Include S_ubfolders" InputGestureText="Ctrl+F" IsCheckable="True" Click="OnToggleSubfolders"/>
                 <Separator/>
                 <MenuItem x:Name="MenuInfoPanel" Header="_Info Panel" InputGestureText="Ctrl+I" IsCheckable="True" Click="OnToggleInfoPanel"/>
                 <MenuItem x:Name="MenuMoreExif" Header="More _EXIF Details" IsCheckable="True" Click="OnToggleMoreExif"/>
@@ -69,7 +69,7 @@
             </MenuItem>
             <MenuItem Header="S_lideshow">
                 <MenuItem x:Name="MenuLoop" Header="_Loop" IsCheckable="True" Click="OnSlideshowOption"/>
-                <MenuItem x:Name="MenuRandom" Header="_Random Order" IsCheckable="True" Click="OnSlideshowOption"/>
+                <MenuItem x:Name="MenuRandom" Header="_Random Order" InputGestureText="Ctrl+S" IsCheckable="True" Click="OnSlideshowOption"/>
                 <MenuItem x:Name="MenuScaleUp" Header="Scale Small Images _Up" IsCheckable="True" Click="OnSlideshowOption"/>
                 <MenuItem x:Name="MenuActualSize" Header="Show _Actual Size" IsCheckable="True" Click="OnSlideshowOption"/>
                 <MenuItem x:Name="MenuAutoAdvance" Header="Auto-_advance" IsCheckable="True" Click="OnSlideshowOption"/>
@@ -90,12 +90,12 @@
                     <Button x:Name="SlideshowButton" Content="Slideshow" Padding="14,1" Margin="0,0,16,0"
                             VerticalAlignment="Center" IsEnabled="False" Click="OnStartSlideshow"
                             ToolTip="Start a slideshow of the selected images, or of the whole folder (Enter)"/>
-                    <CheckBox x:Name="SubfoldersCheck" Content="Include subfolders" VerticalAlignment="Center"
+                    <CheckBox x:Name="SubfoldersCheck" Content="Subfolders" VerticalAlignment="Center"
                               Margin="0,0,14,0" Click="OnToggleSubfolders"
-                              ToolTip="Show images from all folders below the selected one"/>
+                              ToolTip="Show images from all folders below the selected one (Ctrl+F)"/>
                     <CheckBox x:Name="RandomCheck" Content="Random" VerticalAlignment="Center"
                               Margin="0,0,16,0" Click="OnToggleRandom"
-                              ToolTip="Show slideshows in random order (press S during a slideshow to toggle it)"/>
+                              ToolTip="Show slideshows in random order (Ctrl+S; press S during a slideshow to toggle it)"/>
                     <TextBlock Text="Size " VerticalAlignment="Center" Margin="0,0,6,0"/>
                     <Slider Minimum="40" Maximum="400" Width="150" VerticalAlignment="Center"
                             Value="{Binding CellWidth, Mode=TwoWay}" SmallChange="10" LargeChange="40"
@@ -103,7 +103,7 @@
                 </StackPanel>
             </StatusBarItem>
             <StatusBarItem x:Name="BusyItem" Visibility="Collapsed">
-                <ProgressBar x:Name="BusyBar" Width="130" Height="12" IsIndeterminate="True"/>
+                <ProgressBar x:Name="BusyBar" Width="130" Height="12" IsIndeterminate="True" Foreground="#C4561D"/>  <!-- fallback; normally the Windows accent colour, set in code -->
             </StatusBarItem>
             <StatusBarItem>
                 <TextBlock x:Name="StatusText" TextTrimming="CharacterEllipsis"/>

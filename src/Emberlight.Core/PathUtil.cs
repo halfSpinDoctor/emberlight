@@ -23,5 +23,25 @@ public static class PathUtil
         }
     }
 
+    /// <summary>
+    /// Whether "Include subfolders" stays on when the browser moves to <paramref name="newPath"/>, given the folder
+    /// where it was switched on (<paramref name="subfolderRoot"/>) and the user's <see cref="SubfolderMode"/>.
+    /// </summary>
+    public static bool SubfoldersStayOn(SubfolderMode mode, string newPath, string subfolderRoot)
+        => mode == SubfolderMode.Always || IsSameOrDescendant(newPath, subfolderRoot);
+
+    /// <summary>
+    /// For a network share root such as <c>\\server\share</c>, the folder-tree label Explorer would use:
+    /// <c>share (\\server)</c>. Null for anything that isn't a UNC share (drive paths, device paths like <c>\\?\</c>).
+    /// </summary>
+    public static string? NetworkShareLabel(string? shareRoot)
+    {
+        if (string.IsNullOrEmpty(shareRoot) || shareRoot.Length < 2) return null;
+        bool unc = shareRoot[0] is '\\' or '/' && shareRoot[1] is '\\' or '/';
+        if (!unc || shareRoot.StartsWith(@"\\?\") || shareRoot.StartsWith(@"\\.\")) return null;
+        var parts = shareRoot.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 ? $@"{parts[1]} (\\{parts[0]})" : null;
+    }
+
     private static string Trim(string p) => p.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 }

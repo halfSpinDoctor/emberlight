@@ -245,6 +245,31 @@ internal static class PathAndProgressTests
             T.True(!PathUtil.IsSameOrDescendant("bad\0path", root));
             T.True(!PathUtil.IsSameOrDescendant(root, ""));
         });
+        T.Run("network share roots get an Explorer-style label; other paths get none", () =>
+        {
+            T.Eq(@"photos (\\truenas.local)", PathUtil.NetworkShareLabel(@"\\truenas.local\photos"));
+            T.Eq(@"photos (\\nas)", PathUtil.NetworkShareLabel(@"\\nas\photos\"));
+            T.Eq(@"photos (\\nas)", PathUtil.NetworkShareLabel("//nas/photos"));
+            T.Eq(null, PathUtil.NetworkShareLabel(@"C:\"));
+            T.Eq(null, PathUtil.NetworkShareLabel(@"\\nas"), "a server alone is not a share");
+            T.Eq(null, PathUtil.NetworkShareLabel(@"\\?\C:\"));
+            T.Eq(null, PathUtil.NetworkShareLabel(@"\\.\PhysicalDrive0"));
+            T.Eq(null, PathUtil.NetworkShareLabel(@"\photos"));
+            T.Eq(null, PathUtil.NetworkShareLabel(""));
+            T.Eq(null, PathUtil.NetworkShareLabel(null));
+        });
+        T.Run("subfolders stay on: inside the tree when resetting, anywhere when set to Always", () =>
+        {
+            string inside = Path.Combine(root, "2020"), outside = Path.Combine(Path.GetDirectoryName(root)!, "Other");
+            T.True(PathUtil.SubfoldersStayOn(SubfolderMode.ResetOnNewTree, root, root));
+            T.True(PathUtil.SubfoldersStayOn(SubfolderMode.ResetOnNewTree, inside, root));
+            T.True(!PathUtil.SubfoldersStayOn(SubfolderMode.ResetOnNewTree, outside, root));
+            T.True(!PathUtil.SubfoldersStayOn(SubfolderMode.ResetOnNewTree, Path.GetDirectoryName(root)!, root), "parent");
+            T.True(PathUtil.SubfoldersStayOn(SubfolderMode.Always, outside, root));
+            T.True(PathUtil.SubfoldersStayOn(SubfolderMode.Always, Path.GetDirectoryName(root)!, root));
+        });
+
+        ClickExpandTests();
 
         T.Group("DirectoryScanner progress");
         T.Run("reports the running count every 250 files, in increasing order", () =>
@@ -266,6 +291,74 @@ internal static class PathAndProgressTests
             var p = new SyncProgress();
             T.Eq(300, scanner.ScanSorted(d.Path, false, SortOrder.Default, progress: p).Count);
             T.SeqEq(new[] { 250 }, p.Reports);
+        });
+    }
+
+    private sealed class Node(string name, Node? parent = null)
+    {
+        public Node? Parent { get; } = parent;
+        public IEnumerable<Node> SelfAndAncestors() { for (var n = this; n != null; n = n.Parent) yield return n; }
+        public override string ToString() => name;
+    }
+
+    static void ClickExpandTests()
+    {
+        T.Group("ClickExpandTracker");
+        // C:\ > Pics > 2020 > June, and C:\ > Docs; plus a shortcut entry for Pics outside the drive tree.
+        var c = new Node("C");
+        var pics = new Node("Pics", c);
+        var y2020 = new Node("2020", pics);
+        var june = new Node("June", y2020);
+        var docs = new Node("Docs", c);
+        var picsShortcut = new Node("*Pics");
+
+        T.Run("clicking a sibling collapses the folder opened by the previous click", () =>
+        {
+            var t = new ClickExpandTracker<Node>();
+            T.Eq(0, t.Click(pics, pics.SelfAndAncestors(), true).Count);
+            T.SeqEq(new[] { pics }, t.Click(docs, docs.SelfAndAncestors(), true));
+            T.SeqEq(new[] { docs }, t.Expanded);
+        });
+        T.Run("clicking deeper keeps the ancestors open; clicking away collapses the whole chain, deepest first", () =>
+        {
+            var t = new ClickExpandTracker<Node>();
+            t.Click(c, c.SelfAndAncestors(), true);
+            t.Click(pics, pics.SelfAndAncestors(), true);
+            T.Eq(0, t.Click(y2020, y2020.SelfAndAncestors(), true).Count);
+            T.Eq(0, t.Click(june, june.SelfAndAncestors(), false).Count, "leaf: nothing to expand or collapse");
+            T.SeqEq(new[] { y2020, pics }, t.Click(docs, docs.SelfAndAncestors(), false), "C stays: it is Docs' parent");
+            T.SeqEq(new[] { c }, t.Expanded);
+        });
+        T.Run("clicking back up to an ancestor collapses what was opened below it", () =>
+        {
+            var t = new ClickExpandTracker<Node>();
+            t.Click(pics, pics.SelfAndAncestors(), true);
+            t.Click(y2020, y2020.SelfAndAncestors(), true);
+            T.SeqEq(new[] { y2020 }, t.Click(pics, pics.SelfAndAncestors(), false));
+            T.SeqEq(new[] { pics }, t.Expanded);
+        });
+        T.Run("folders not opened by a click (arrow, keyboard, already open) are never collapsed", () =>
+        {
+            var t = new ClickExpandTracker<Node>();
+            T.Eq(0, t.Click(pics, pics.SelfAndAncestors(), false).Count, "Pics was already open");
+            T.Eq(0, t.Click(docs, docs.SelfAndAncestors(), true).Count);
+        });
+        T.Run("forgetting a folder (its arrow was used) keeps it open", () =>
+        {
+            var t = new ClickExpandTracker<Node>();
+            t.Click(pics, pics.SelfAndAncestors(), true);
+            t.Forget(pics);
+            T.Eq(0, t.Click(docs, docs.SelfAndAncestors(), true).Count);
+            t.Clear();
+            T.Eq(0, t.Expanded.Count);
+        });
+        T.Run("nodes compare by identity: a shortcut to the same folder is a different node", () =>
+        {
+            var t = new ClickExpandTracker<Node>();
+            t.Click(pics, pics.SelfAndAncestors(), true);
+            T.SeqEq(new[] { pics }, t.Click(picsShortcut, picsShortcut.SelfAndAncestors(), true));
+            t.Click(picsShortcut, picsShortcut.SelfAndAncestors(), true);
+            T.SeqEq(new[] { picsShortcut }, t.Expanded, "clicking the same node twice tracks it once");
         });
     }
 }
@@ -298,6 +391,20 @@ internal static class FolderNavigatorTests
             Directory.CreateDirectory(d.File("lib/4"));
             var sibs = FolderNavigator.GetSiblingFolders(d.File("lib/3")).Select(Path.GetFileName).ToList();
             T.SeqEq(new[] { "1", "2", "3", "4", "10", "11", "12" }, sibs);
+        });
+
+        T.Run("subfolders (for the folder tree): natural order, folders only, hidden skipped, missing is empty", () =>
+        {
+            using var d = MakeTree(layout);
+            d.Write("lib/loose.jpg", new byte[] { 1 });
+            var hidden = Directory.CreateDirectory(d.File("lib/.hidden"));
+            if (OperatingSystem.IsWindows()) hidden.Attributes |= FileAttributes.Hidden;
+            var subs = FolderNavigator.GetSubfolders(d.File("lib")).Select(Path.GetFileName).ToList();
+            if (!OperatingSystem.IsWindows()) subs.Remove(".hidden");   // "hidden" is a Windows attribute
+            T.SeqEq(new[] { "1", "2", "3", "10", "11", "12" }, subs);
+            T.Eq(0, FolderNavigator.GetSubfolders(d.File("lib/1")).Count, "no subfolders");
+            T.Eq(0, FolderNavigator.GetSubfolders(d.File("nope")).Count, "missing folder");
+            T.Eq(0, FolderNavigator.GetSubfolders("bad\0path").Count, "invalid path");
         });
 
         T.Run("next and previous skip folders that have no images", () =>

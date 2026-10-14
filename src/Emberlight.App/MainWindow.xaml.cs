@@ -21,7 +21,7 @@ namespace Emberlight.App;
 /// </summary>
 public partial class MainWindow : Window
 {
-    private static readonly (SortField Field, string Label)[] SortChoices =
+    internal static readonly (SortField Field, string Label)[] SortChoices =
     {
         (SortField.Name, "Name"),
         (SortField.DateModified, "Date Modified"),
@@ -55,13 +55,18 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _scanCts;
     private ScrollViewer? _thumbScroll;
     private bool _suppressTreeNav;
-    private bool _moreExif;
+    private readonly ClickExpandTracker<TreeViewItem> _clickExpanded = new();   // folders opened by clicking their name
+    private readonly Dictionary<TreeViewItem, Task> _childLoads = new();   // folders whose subfolders are being read
+    private int _treeSelectVersion;      // bumped by each tree walk and user selection; an older walk then stops
+    private Task _treeRootsListed = Task.CompletedTask;    // done once the shortcuts are in and drive checks started
+    private readonly Dictionary<string, Task> _driveChecks = new(StringComparer.OrdinalIgnoreCase);   // drive root -> its readiness check
 
     public MainWindow(AppSettings settings, string? startPath)
     {
         InitializeComponent();
         _settings = settings;
         _startPath = startPath;
+        UseAccentColorForBusyBar();
 
         _types.ApplyIgnored(settings.IgnoredFileTypes);
         _scanner = new DirectoryScanner(_types);
@@ -102,7 +107,7 @@ public partial class MainWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        BuildTreeRoots();
+        _treeRootsListed = BuildTreeRootsAsync();     // SelectPathInTree waits for this (and for its own drive)
         _loader.Configure(ThumbDecodeSize());
 
         string start = ResolveStartPath();
@@ -162,26 +167,55 @@ public partial class MainWindow : Window
     // Folder tree
     // ===============================================================================================
 
-    private void BuildTreeRoots()
+    /// <summary>
+    /// Fills the tree's top level: the \u2605 shortcuts, then the drives in letter order. All file-system checks run on
+    /// worker threads. Asking whether a drive is ready can take many seconds (a mapped drive whose server is
+    /// offline), so each drive is checked separately and slotted into place as soon as it answers. Returns once the
+    /// shortcuts are in and the drive checks have started (see <see cref="_driveChecks"/>).
+    /// </summary>
+    private async Task BuildTreeRootsAsync()
     {
         FolderTree.Items.Clear();
-        void AddQuick(string? path, string label)
-        {
-            if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
-                FolderTree.Items.Add(MakeTreeItem(path, "\u2605 " + label));   // star marks the shortcuts
-        }
-        AddQuick(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Pictures");
-        AddQuick(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Desktop");
-        AddQuick(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Documents");
-        AddQuick(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"), "Downloads");
+        _clickExpanded.Clear();
+        _driveChecks.Clear();
 
-        foreach (var drive in DriveInfo.GetDrives())
+        var (shortcuts, drives) = await Task.Run(() =>
         {
-            try
+            var found = new List<(string Path, string Label)>();
+            void AddQuick(string? path, string label)
             {
-                if (drive.IsReady) FolderTree.Items.Add(MakeTreeItem(drive.RootDirectory.FullName, drive.Name));
+                if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path)) found.Add((path, "\u2605 " + label));   // star marks the shortcuts
             }
-            catch (IOException) { }
+            AddQuick(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Pictures");
+            AddQuick(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Desktop");
+            AddQuick(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Documents");
+            AddQuick(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"), "Downloads");
+
+            DriveInfo[] all;
+            try { all = DriveInfo.GetDrives(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { all = []; }
+            return (found, all);
+        });
+
+        foreach (var (path, label) in shortcuts) FolderTree.Items.Add(MakeTreeItem(path, label));
+
+        int firstDriveIndex = FolderTree.Items.Count;
+        var ready = new bool[drives.Length];
+        for (int i = 0; i < drives.Length; i++)
+            _driveChecks[drives[i].RootDirectory.FullName.TrimEnd('\\', '/')] = AddDriveWhenReadyAsync(drives[i], i);
+
+        async Task AddDriveWhenReadyAsync(DriveInfo drive, int i)
+        {
+            bool isReady = await Task.Run(() =>
+            {
+                try { return drive.IsReady; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+            });
+            if (!isReady) return;
+            // Continuations run on the UI thread, so the slot arithmetic can't race with another drive's.
+            ready[i] = true;
+            int slot = firstDriveIndex + ready.Take(i).Count(r => r);
+            FolderTree.Items.Insert(slot, MakeTreeItem(drive.RootDirectory.FullName, drive.Name));
         }
     }
 
@@ -198,50 +232,94 @@ public partial class MainWindow : Window
 
     private void OnTreeItemExpanded(object sender, RoutedEventArgs e)
     {
-        if (e.OriginalSource is TreeViewItem item && ReferenceEquals(item, sender)) EnsureChildrenLoaded(item);
+        if (e.OriginalSource is TreeViewItem item && ReferenceEquals(item, sender)) _ = EnsureChildrenLoadedAsync(item);
     }
 
-    private void EnsureChildrenLoaded(TreeViewItem item)
+    /// <summary>
+    /// Replaces a folder's placeholder child with its real subfolders. The folder is read on a worker thread,
+    /// since that can take seconds on a network share or a sleeping disk; the "…" placeholder shows meanwhile.
+    /// Calls made while a read is in progress share it.
+    /// </summary>
+    private Task EnsureChildrenLoadedAsync(TreeViewItem item)
     {
-        if (!IsPlaceholder(item) || item.Tag is not string path) return;
-        item.Items.Clear();
+        if (!IsPlaceholder(item) || item.Tag is not string path) return Task.CompletedTask;
+        if (_childLoads.TryGetValue(item, out var running)) return running;
+        var load = LoadChildrenAsync(item, path);
+        if (!load.IsCompleted) _childLoads[item] = load;
+        return load;
+    }
 
-        var dirs = new List<string>();
+    private async Task LoadChildrenAsync(TreeViewItem item, string path)
+    {
         try
         {
-            var options = new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = FileAttributes.Hidden | FileAttributes.System };
-            dirs.AddRange(Directory.EnumerateDirectories(path, "*", options));
+            var dirs = await Task.Run(() => FolderNavigator.GetSubfolders(path));
+            item.Items.Clear();
+            foreach (var d in dirs) item.Items.Add(MakeTreeItem(d, Path.GetFileName(d)));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-
-        dirs.Sort((a, b) => NaturalStringComparer.Instance.Compare(Path.GetFileName(a), Path.GetFileName(b)));
-        foreach (var d in dirs) item.Items.Add(MakeTreeItem(d, Path.GetFileName(d)));
+        finally { _childLoads.Remove(item); }
     }
 
     /// <summary>Expands the tree down to <paramref name="path"/> (via its drive) and selects it without navigating.</summary>
-    private void SelectPathInTree(string path)
+    private async void SelectPathInTree(string path)
     {
+        try { await SelectPathInTreeAsync(path); }
+        catch (Exception ex) { StatusText.Text = ex.Message; }
+    }
+
+    /// <summary>
+    /// Expands the tree down to <paramref name="path"/> and selects it (without navigating: the caller does that).
+    /// Each level's subfolders are read in the background, so this can take a while on a network share; it gives up
+    /// if another folder is selected in the meantime.
+    /// </summary>
+    private async Task SelectPathInTreeAsync(string path)
+    {
+        int version = ++_treeSelectVersion;
         string full;
         try { full = Path.GetFullPath(path); }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return; }
 
         string root = Path.GetPathRoot(full) ?? "";
-        var current = FolderTree.Items.OfType<TreeViewItem>().FirstOrDefault(i =>
+        TreeViewItem? FindRoot() => FolderTree.Items.OfType<TreeViewItem>().FirstOrDefault(i =>
             i.Tag is string t && string.Equals(t.TrimEnd('\\', '/'), root.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)
             && !i.Header.ToString()!.StartsWith('\u2605'));
-        if (current == null) return;      // e.g. a network path with no drive letter
+        await _treeRootsListed;
+        if (version != _treeSelectVersion) return;
+        var current = FindRoot();
+        if (current == null && _driveChecks.TryGetValue(root.TrimEnd('\\', '/'), out var driveCheck))
+        {
+            await driveCheck;                         // the drive may still be answering whether it is ready
+            if (version != _treeSelectVersion) return;
+            current = FindRoot();
+        }
+        // A network share without a drive letter (\\server\share) has no root entry until a folder on it is opened.
+        // (Shares can't be listed from the server name alone without native calls, so the share is the root.)
+        if (current == null && PathUtil.NetworkShareLabel(root) is { } shareLabel)
+        {
+            bool exists = await Task.Run(() => Directory.Exists(root));
+            if (version != _treeSelectVersion) return;
+            current = FindRoot();                     // another call may have added it while we waited
+            if (current == null && exists)
+            {
+                current = MakeTreeItem(root, shareLabel);
+                FolderTree.Items.Add(current);
+            }
+        }
+        if (current == null) return;
 
         string acc = root;
         foreach (string segment in full[root.Length..].Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries))
         {
-            current.IsExpanded = true;
-            EnsureChildrenLoaded(current);
+            OpenAsIfClicked(current);
+            await EnsureChildrenLoadedAsync(current);
+            if (version != _treeSelectVersion) return;   // the user picked another folder while this one loaded
             acc = Path.Combine(acc, segment);
             var child = current.Items.OfType<TreeViewItem>().FirstOrDefault(i =>
                 i.Tag is string t && string.Equals(t, acc, StringComparison.OrdinalIgnoreCase));
             if (child == null) break;
             current = child;
         }
+        OpenAsIfClicked(current);                     // the folder itself too, as a click would
 
         _suppressTreeNav = true;
         try { current.IsSelected = true; }
@@ -252,17 +330,44 @@ public partial class MainWindow : Window
     /// <summary>
     /// Clicking a folder's name expands it, so its subfolders appear without a second click on the arrow.
     /// The arrow itself still toggles normally, and a double-click no longer collapses what the first click
-    /// just opened (WPF's default double-click toggles). Keyboard navigation doesn't auto-expand.
+    /// just opened (WPF's default double-click toggles). Clicking another folder collapses the folders that
+    /// earlier clicks opened, apart from its own parents (<see cref="ClickExpandTracker{TNode}"/>). Keyboard
+    /// navigation neither expands nor collapses anything.
     /// </summary>
     private void OnTreePreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Left) return;
         var source = e.OriginalSource as DependencyObject;
-        if (FindAncestor<ToggleButton>(source) != null) return;           // the expander arrow handles itself
         if (FindAncestor<TreeViewItem>(source) is not { } item) return;
+        if (FindAncestor<ToggleButton>(source) != null)                   // the expander arrow handles itself,
+        {
+            _clickExpanded.Forget(item);                                  // and puts that folder under manual control
+            return;
+        }
 
         if (e.ClickCount > 1) { e.Handled = true; return; }               // keep it open on double-click
+        OpenAsIfClicked(item);
+    }
+
+    /// <summary>
+    /// Opens a folder the way clicking its name does: expands it and closes the folders earlier clicks opened,
+    /// except this one's parents. Also used for each level when the app opens a folder itself (startup folder,
+    /// File &gt; Open, drag and drop), so those folders close again when the user clicks elsewhere.
+    /// </summary>
+    private void OpenAsIfClicked(TreeViewItem item)
+    {
+        bool expands = item.HasItems && !item.IsExpanded;
+        // WPF moves the selection onto a folder that is collapsed around it; don't load that folder, since
+        // the caller is about to select the one opened.
+        _suppressTreeNav = true;
+        try { foreach (var other in _clickExpanded.Click(item, SelfAndTreeAncestors(item), expands)) other.IsExpanded = false; }
+        finally { _suppressTreeNav = false; }
         if (item.HasItems) item.IsExpanded = true;                        // loads the children on first expand
+    }
+
+    private static IEnumerable<TreeViewItem> SelfAndTreeAncestors(TreeViewItem item)
+    {
+        for (var i = item; i != null; i = ItemsControl.ItemsControlFromItemContainer(i) as TreeViewItem) yield return i;
     }
 
     private static T? FindAncestor<T>(DependencyObject? d) where T : DependencyObject
@@ -278,6 +383,7 @@ public partial class MainWindow : Window
     private void OnFolderSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
         if (_suppressTreeNav) return;
+        _treeSelectVersion++;                     // the user chose a folder: stop any tree walk still in progress
         if (e.NewValue is TreeViewItem { Tag: string path }) NavigateTo(path);
     }
 
@@ -398,11 +504,25 @@ public partial class MainWindow : Window
         StatusText.Text = message;
     }
 
+    /// <summary>
+    /// Colours the loading bar with the Windows accent colour, as a dynamic resource so it follows the user changing it
+    /// in Settings. If the accent colour can't be read, the ember orange set in the XAML stays.
+    /// </summary>
+    private void UseAccentColorForBusyBar()
+    {
+        try
+        {
+            if (SystemColors.AccentColor.A == 0) return;       // nothing usable (e.g. no accent colour on this system)
+            BusyBar.SetResourceReference(ForegroundProperty, SystemColors.AccentColorBrushKey);
+        }
+        catch (Exception) { /* keep the fallback colour; a cosmetic setting must never stop the window opening */ }
+    }
+
     private void EndBusy() => BusyItem.Visibility = Visibility.Collapsed;
 
     /// <summary>
     /// "Include subfolders" stays on while you browse within the tree where you switched it on, and is
-    /// switched off when you move to a folder outside that tree.
+    /// switched off when you move to a folder outside that tree, unless the preference says to keep it on.
     /// </summary>
     private void ApplySubfolderPolicy(string newPath)
     {
@@ -410,7 +530,7 @@ public partial class MainWindow : Window
 
         // First navigation of the session (a remembered "on" from last time): the start folder is the tree root.
         _subfolderRoot ??= _currentFolder ?? newPath;
-        if (PathUtil.IsSameOrDescendant(newPath, _subfolderRoot)) return;
+        if (PathUtil.SubfoldersStayOn(_settings.IncludeSubfoldersMode, newPath, _subfolderRoot)) return;
 
         _settings.IncludeSubfolders = false;
         _subfolderRoot = null;
@@ -548,7 +668,7 @@ public partial class MainWindow : Window
         var exif = ExifReader.Read(item.Path);
         if (exif != null)
         {
-            string text = exif.ToDisplayString(_moreExif);
+            string text = exif.ToDisplayString(_settings.InfoPanelMoreExif);
             if (text.Length > 0) sb.AppendLine().AppendLine(text);
         }
         InfoBody.Text = sb.ToString();
@@ -592,7 +712,7 @@ public partial class MainWindow : Window
         MenuSubfolders.IsChecked = _settings.IncludeSubfolders;
         SubfoldersCheck.IsChecked = _settings.IncludeSubfolders;
         MenuInfoPanel.IsChecked = InfoPanel.Visibility == Visibility.Visible;
-        MenuMoreExif.IsChecked = _moreExif;
+        MenuMoreExif.IsChecked = _settings.InfoPanelMoreExif;
         MenuLoop.IsChecked = _settings.SlideshowLoop;
         MenuRandom.IsChecked = _settings.SlideshowRandom;
         RandomCheck.IsChecked = _settings.SlideshowRandom;
@@ -662,7 +782,16 @@ public partial class MainWindow : Window
             start = selected.Count == 1 ? Math.Max(0, _items.IndexOf(selected[0])) : 0;
         }
 
-        var show = new SlideshowWindow(_settings, files, start, _sortOrder, _scanner, _settings.IncludeSubfolders, _currentFolder, fullScreen);
+        ShowSlideshow(files, start, _settings.IncludeSubfolders, _currentFolder, fullScreen);
+    }
+
+    /// <summary>
+    /// Opens a slideshow that reports back to this browser: it follows folder jumps, and when the slideshow
+    /// closes it selects the last image shown. Also used for slideshows started from "Open with".
+    /// </summary>
+    public void ShowSlideshow(IReadOnlyList<string> files, int start, bool includeSubfolders, string? startFolder, bool fullScreen)
+    {
+        var show = new SlideshowWindow(_settings, files, start, _sortOrder, _scanner, includeSubfolders, startFolder, fullScreen);
         show.FolderJumped += OnSlideshowFolderJumped;
         show.Closed += (_, _) =>
         {
@@ -745,10 +874,6 @@ public partial class MainWindow : Window
         bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
         switch (e.Key)
         {
-            case Key.Enter:
-                StartSlideshow(_settings.SlideshowDefaultFullScreen);
-                e.Handled = true;
-                break;
             case Key.Delete:
                 OnDelete(sender, e);
                 e.Handled = true;
@@ -801,11 +926,33 @@ public partial class MainWindow : Window
         if (e.Handled) return;
         bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
         if (e.Key == Key.F5) { Rescan(); e.Handled = true; }
+        else if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.None && EnterStartsSlideshow())
+        {
+            // Window-wide so it works with nothing selected (focus is then usually on the folder tree).
+            StartSlideshow(_settings.SlideshowDefaultFullScreen);
+            e.Handled = true;
+        }
         else if (ctrl && e.Key == Key.O) { OnOpenFolder(this, e); e.Handled = true; }
         else if (ctrl && e.Key == Key.I) { OnToggleInfoPanel(this, e); e.Handled = true; }
+        else if (ctrl && e.Key == Key.F)
+        {
+            SubfoldersCheck.IsChecked = SubfoldersCheck.IsChecked != true;
+            OnToggleSubfolders(SubfoldersCheck, e);
+            e.Handled = true;
+        }
+        else if (ctrl && e.Key == Key.S)
+        {
+            RandomCheck.IsChecked = RandomCheck.IsChecked != true;
+            OnToggleRandom(RandomCheck, e);
+            e.Handled = true;
+        }
         else if (ctrl && (e.Key == Key.OemPlus || e.Key == Key.Add)) { _view.CellWidth += 20; e.Handled = true; }
         else if (ctrl && (e.Key == Key.OemMinus || e.Key == Key.Subtract)) { _view.CellWidth -= 20; e.Handled = true; }
     }
+
+    /// <summary>False where Enter already does something: an open menu, a focused button or a text box.</summary>
+    private static bool EnterStartsSlideshow()
+        => Keyboard.FocusedElement is not (MenuItem or Button or TextBoxBase);
 
     // ===============================================================================================
     // Menu: file operations
@@ -923,7 +1070,7 @@ public partial class MainWindow : Window
         Rescan();
     }
     private void OnToggleInfoPanel(object sender, RoutedEventArgs e) => SetInfoPanelVisible(InfoPanel.Visibility != Visibility.Visible);
-    private void OnToggleMoreExif(object sender, RoutedEventArgs e) { _moreExif = MenuMoreExif.IsChecked; UpdateInfoPanel(); }
+    private void OnToggleMoreExif(object sender, RoutedEventArgs e) { _settings.InfoPanelMoreExif = MenuMoreExif.IsChecked; UpdateInfoPanel(); }
     private void OnLarger(object sender, RoutedEventArgs e) => _view.CellWidth += 20;
     private void OnSmaller(object sender, RoutedEventArgs e) => _view.CellWidth -= 20;
     private void OnRefresh(object sender, RoutedEventArgs e) => Rescan();
@@ -932,14 +1079,34 @@ public partial class MainWindow : Window
     // Menu: preferences / about
     // ===============================================================================================
 
-    private void OnPreferences(object sender, RoutedEventArgs e)
+    private async void OnPreferences(object sender, RoutedEventArgs e)
     {
+        CaptureSessionState();                   // so the dialog shows the current sort order and filename setting
+        var oldSort = _sortOrder;
+        bool oldSubfolders = _settings.IncludeSubfolders;
+        var oldMode = _settings.IncludeSubfoldersMode;
+
         var dlg = new PreferencesWindow(_settings, _types) { Owner = this };
         if (dlg.ShowDialog() != true) return;
 
         ThumbnailItem.AutoRotate = _settings.AutoRotateByOrientationTag;
         foreach (var item in _items) item.RefreshOrientation();
         _view.ShowFilenames = _settings.ShowFilenames;
+        SetInfoPanelVisible(_settings.InfoPanelVisible);     // also refreshes it for the "More EXIF details" setting
+
+        // Include subfolders (or how it behaves) changed: the tree it applies to starts at the folder on screen.
+        bool subfoldersChanged = _settings.IncludeSubfolders != oldSubfolders;
+        if (subfoldersChanged || _settings.IncludeSubfoldersMode != oldMode)
+            _subfolderRoot = _settings.IncludeSubfolders ? _currentFolder : null;
+        bool rescan = dlg.FileTypesChanged || subfoldersChanged;
+
+        // A new sort order: a rescan sorts with it anyway; otherwise re-sort what is on screen.
+        Task resort = Task.CompletedTask;
+        if (_settings.SortOrder != oldSort)
+        {
+            if (rescan) { _sortOrder = _settings.SortOrder; _meta.Clear(); _comparer = FileComparers.For(_sortOrder, _meta); }
+            else resort = ApplySortAsync(_settings.SortOrder);   // sets _sortOrder before its first await
+        }
         SyncMenuState();
 
         // Save now rather than waiting for exit. Capture first so the file also holds the current
@@ -949,17 +1116,14 @@ public partial class MainWindow : Window
             MessageBox.Show(this, "Your preferences were applied, but they couldn't be saved to disk.\n\n" + SettingsStore.DefaultPath,
                 "Emberlight", MessageBoxButton.OK, MessageBoxImage.Warning);
 
-        if (dlg.FileTypesChanged) Rescan();      // different extensions enabled: the file list changes
+        if (rescan) Rescan();                    // different file types or subfolders: the file list changes
         else StatusText.Text = "Preferences saved";
+        try { await resort; }
+        catch (Exception ex) { StatusText.Text = ex.Message; }
     }
 
     private void OnAbout(object sender, RoutedEventArgs e)
-        => MessageBox.Show(this,
-            "Emberlight\n\n" +
-            "Emberlight is a Windows port of Phoenix Slides by Dominic Yu\n(https://github.com/gobbledegook/creevey).\n\n" +
-            "Licensed under Creative Commons Attribution-NonCommercial-ShareAlike 2.0. " +
-            "See LICENSE-NOTICE.md.",
-            "About Emberlight", MessageBoxButton.OK, MessageBoxImage.Information);
+        => new AboutWindow { Owner = this }.ShowDialog();
 
     // ===============================================================================================
     // Drag and drop

@@ -48,7 +48,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~137 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~150 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.
@@ -58,10 +58,14 @@ are timing based and could be flaky on a loaded CI machine.
 ## Behaviour decisions made with the user (keep these)
 - **Image formats:** whatever WIC decodes natively (JPEG, PNG, TIFF, BMP, static GIF). HEIC, WebP, animated GIF,
   RAW and JPEG 2000 are intentionally out of scope for now.
-- **Include subfolders** (checkbox in the status bar + View menu): stays on while browsing inside the folder tree
-  where it was switched on; switches off when you pick a folder outside that tree. During slideshow folder jumps it
+- **Include subfolders** (checkbox in the status bar + View menu): by default stays on while browsing inside the folder
+  tree where it was switched on and switches off when you pick a folder outside that tree. Preferences > View lets the
+  user choose "Always" instead (`AppSettings.IncludeSubfoldersMode`, `PathUtil.SubfoldersStayOn`); this choice is
+  deliberately not in the View menu. During slideshow folder jumps it
   stays on, and the browser's tree root moves to the folder jumped to.
 - **Preferences** are saved when OK is clicked (plus session state - last folder, window size, sort - at exit).
+  The Preferences View tab mirrors the View menu's settings (sort, filenames, subfolders, info panel, More EXIF
+  details, which is now persisted) and the Slideshow tab mirrors the Slideshow menu.
 - **Loading feedback:** status-bar progress bar and text while scanning/sorting/loading a folder.
 - **Slideshow Ctrl+Right / Ctrl+Left:** jump to the next/previous *sibling* folder in natural name order. Skips
   folders with no images, stops at the ends (beep + message, no wrap-around), keeps random mode (new folder starts
@@ -70,11 +74,26 @@ are timing based and could be flaky on a loaded CI machine.
   background (debounced 400 ms) and selects the last-viewed image when the slideshow closes.
 - **Status bar (right side, in this order):** Slideshow button, Include subfolders, Random, thumbnail-size slider. The Random
   checkbox and Slideshow > Random Order are the same setting (`AppSettings.SlideshowRandom`), kept in sync by
-  `SyncMenuState`. The Slideshow button is disabled while the grid is empty.
-- **Folder tree:** clicking a folder's name expands it (`OnTreePreviewMouseDown`); the arrow toggles as normal; double-click
-  doesn't collapse; keyboard navigation doesn't auto-expand.
+  `SyncMenuState`. The Slideshow button is disabled while the grid is empty. Browser shortcuts: `Ctrl+F` toggles
+  Include subfolders, `Ctrl+S` toggles Random (handled in `OnPreviewKeyDown`).
+- **Network shares:** a UNC share without a drive letter (`\\server\share`) gets a top-level tree entry, labelled
+  `share (\\server)`, the first time a folder on it is opened (`SelectPathInTree`, `PathUtil.NetworkShareLabel`).
+  For this session only; there's no browsing of a server's shares (that needs native calls). Tree folders read their
+  subfolders on a worker thread (`EnsureChildrenLoadedAsync`); `SelectPathInTree` walks down level by level and stops
+  if the user picks another folder meanwhile (`_treeSelectVersion`).
+  The top level is built off the UI thread too (`BuildTreeRootsAsync`): each drive's readiness is checked separately
+  and the drive slotted into letter order when it answers, so an offline mapped drive can't stall startup. File > Open
+  and drag-and-drop still check that the folder exists on the UI thread (the user chose to leave those).
+- **Folder tree:** clicking a folder's name expands it (`OnTreePreviewMouseDown`), and clicking another folder collapses
+  the folders earlier clicks opened, except the new folder's parents (`ClickExpandTracker`). Folders opened with the
+  arrow or keyboard are never auto-collapsed (using a folder's arrow stops tracking it). Folders the app opens itself
+  (startup folder, File > Open, drag and drop, slideshow follow) count as clicked at every level (`OpenAsIfClicked`). Double-click doesn't collapse;
+  keyboard navigation neither auto-expands nor auto-collapses.
 - **Slideshow `S`:** toggles random for the *running* slideshow only (does not change the saved setting). Off = continue in
   sort order from the current slide; on = current slide first, rest reshuffled. Shows a toast. Quit keys: `Q`, `Esc`, `.`.
+- **"Open with" / files on the command line:** start a slideshow (if the preference is on) with the browser opened
+  behind it at that folder (`MainWindow.ShowSlideshow`), so quitting the slideshow returns to the browser with the
+  last-viewed image selected instead of exiting the app.
 - "Rotate" in the browser edits the EXIF orientation tag only (lossless); there is no pixel rotation.
 
 ## Gotchas learned the hard way

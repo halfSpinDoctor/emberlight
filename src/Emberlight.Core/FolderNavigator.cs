@@ -42,14 +42,25 @@ public static class FolderNavigator
         string full = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(folder));
         string? parent = System.IO.Path.GetDirectoryName(full);
         if (parent == null || !Directory.Exists(parent)) return Array.Empty<string>();
+        return GetSubfolders(parent);
+    }
 
+    /// <summary>
+    /// The visible sub-folders of <paramref name="folder"/> in natural name order (hidden and system folders are
+    /// skipped). Empty if the folder is missing or can't be read. Can be slow on network shares, so the UI calls it
+    /// off the UI thread.
+    /// </summary>
+    public static List<string> GetSubfolders(string folder)
+    {
         var options = new EnumerationOptions
         {
             IgnoreInaccessible = true,
             AttributesToSkip = FileAttributes.Hidden | FileAttributes.System,
             ReturnSpecialDirectories = false,
         };
-        var dirs = Directory.EnumerateDirectories(parent, "*", options).ToList();
+        List<string> dirs;
+        try { dirs = Directory.EnumerateDirectories(folder, "*", options).ToList(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { return new(); }
         dirs.Sort((a, b) => NaturalStringComparer.Instance.Compare(
             System.IO.Path.GetFileName(a), System.IO.Path.GetFileName(b)));
         return dirs;

@@ -9,6 +9,15 @@ public enum StartupFolder
     PicturesFolder = 1,
 }
 
+/// <summary>What happens to "Include subfolders" when the browser moves to another folder.</summary>
+public enum SubfolderMode
+{
+    /// <summary>Switch it off on leaving the folder tree where it was switched on (moving deeper keeps it on).</summary>
+    ResetOnNewTree = 0,
+    /// <summary>Leave it on until the user switches it off.</summary>
+    Always = 1,
+}
+
 /// <summary>User preferences. Defaults mirror the original app's registered NSUserDefaults.</summary>
 public sealed class AppSettings
 {
@@ -53,6 +62,8 @@ public sealed class AppSettings
     public double MainWindowHeight { get; set; } = 720;
     public double FolderTreeWidth { get; set; } = 240;
     public bool IncludeSubfolders { get; set; }
+    public SubfolderMode IncludeSubfoldersMode { get; set; } = SubfolderMode.ResetOnNewTree;
+    public bool InfoPanelMoreExif { get; set; }
 
     public List<string> IgnoredFileTypes { get; set; } = new();
 
@@ -77,6 +88,7 @@ public sealed class AppSettings
         if (!double.IsFinite(FolderTreeWidth)) FolderTreeWidth = 240;
         FolderTreeWidth = Math.Clamp(FolderTreeWidth, 120, 600);
         SlideshowInfoMode = Math.Clamp(SlideshowInfoMode, 0, 2);
+        if (!Enum.IsDefined(IncludeSubfoldersMode)) IncludeSubfoldersMode = SubfolderMode.ResetOnNewTree;
         IgnoredFileTypes ??= new();
         PicturesFolderPath ??= "";
         LastFolderPath ??= "";
