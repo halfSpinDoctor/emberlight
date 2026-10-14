@@ -14,15 +14,16 @@ See `LICENSE-NOTICE.md` (CC BY-NC-SA 2.0) before redistributing.
 |---|---|
 | `src/Emberlight.Core` | Platform-neutral logic, **no dependencies** (net10.0). Everything with real decisions in it. |
 | `src/Emberlight.App` | The WPF application (net10.0-windows): windows, rendering, input. Thin glue over Core. |
-| `tests/Emberlight.Tests` | Dependency-free test runner for Core (137 tests). |
+| `tests/Emberlight.Tests` | Dependency-free test runner for Core (163 tests; each one is described in `TESTS.md`). |
 
 ## Build, test, run (Windows, .NET 10 SDK)
 
+    dotnet build Emberlight.sln
     dotnet run --project tests/Emberlight.Tests        # core tests; exit code = number of failures
     dotnet run --project src/Emberlight.App            # the app
     dotnet run --project src/Emberlight.App -- C:\Pictures\photo.jpg   # open straight into a slideshow
 
-The core tests also run on Linux/macOS.
+Core and the tests also build and run on Linux and macOS; the app itself needs Windows.
 
 ## Mapping from the original
 
@@ -44,31 +45,55 @@ The core tests also run on Linux/macOS.
 
 ## Additions beyond the original
 
-* **Status-bar controls** - next to the thumbnail-size slider: a **Slideshow** button (same as Enter), **Include
-  subfolders** and **Random** checkboxes (Random is the same setting as Slideshow > Random Order).
-* **Click a folder to expand it** in the folder tree (the arrow still toggles; arrow-key navigation doesn't auto-expand).
+**Look and feel**
+
+* **Light and dark mode** - the app follows the Windows light/dark setting and accent colour (WPF's Fluent theme),
+  with compact menus, folder tree, status bar and Preferences. Windows use a solid, neutral background so photos
+  aren't tinted.
+
+**Browser**
+
+* **Status-bar controls** - a **Slideshow** button (same as `Enter`), **Subfolders** and **Random** checkboxes, and
+  the thumbnail-size slider. Random is the same setting as Slideshow > Random Order. Shortcuts: `Ctrl+F` toggles
+  Subfolders, `Ctrl+S` toggles Random, and `Enter` starts a slideshow even when nothing is selected.
+* **Include subfolders** - by default it switches itself off when you open a folder outside the tree where you
+  switched it on (moving deeper keeps it on). Preferences > View can keep it on instead.
+* **Folder tree** - clicking a folder's name expands it, and clicking elsewhere collapses what earlier clicks opened
+  (folders opened with the arrow or the keyboard stay open). Folders are read in the background, so a slow disk or
+  network share doesn't freeze the window, and a network share without a drive letter (`\\server\share`) gets its own
+  entry when you open a folder on it.
+* **Info panel** - its width can be dragged, like the folder tree's, and is remembered.
+* **Preferences > View** - the View menu's settings (sort order, file names, subfolders, info panel) in one place.
+
+**Slideshow**
+
+* **Opening files from Explorer** ("Open with", or dropping files on the exe) starts a slideshow with the browser
+  open behind it, so quitting the slideshow returns to the browser instead of closing the app.
 * **Random order on/off during a slideshow** - press `S`. Turning it off carries on in sort order from the slide on
   screen; turning it on keeps that slide and reshuffles the rest. A short on-screen message confirms the change. It
   affects only the running slideshow, not the saved setting.
 * **Quit a slideshow** with `Q`, `Esc` or `.`.
-* **Mouse wheel in the slideshow** - wheel up for the previous slide, down for the next (one slide per notch; touchpad
-  scrolling adds up to a notch). `Ctrl`+wheel still zooms, and a zoomed-in picture still pans with the wheel.
-* **Next / previous folder in the slideshow** - `Ctrl+Right` / `Ctrl+Left` jump to the next or previous folder at the
-  same level of the tree (siblings, in the folder tree's natural name order). Folders without images are skipped,
-  there is no wrap-around (a beep and a short message at the ends), and a shuffled slideshow stays shuffled. The folder
-  is the folder the slideshow was started from (after a jump, the folder jumped to) for as long as the slide on screen
-  is inside it, otherwise the slide's own folder. So starting in an empty root folder with "Include subfolders" on
-  moves on to the root's next sibling rather than between the root's subfolders. "Include subfolders" carries over.
-  The browser window quietly follows to the new folder, so closing the slideshow leaves it showing, and selecting,
-  what you were just viewing. Logic: `Core/FolderNavigator`.
+* **Mouse wheel** - wheel up for the previous slide, down for the next (one slide per notch; touchpad scrolling adds
+  up to a notch). `Ctrl`+wheel still zooms, and a zoomed-in picture still pans with the wheel.
+* **Next / previous folder** - `Ctrl+Right` / `Ctrl+Left` jump to the next or previous folder at the same level of
+  the tree (siblings, in the folder tree's natural name order). Folders without images are skipped, there is no
+  wrap-around (a beep and a short message at the ends), and a shuffled slideshow stays shuffled. The folder is the
+  one the slideshow was started from (after a jump, the folder jumped to) for as long as the slide on screen is inside
+  it, otherwise the slide's own folder. So starting in an empty root folder with "Include subfolders" on moves on to
+  the root's next sibling rather than between the root's subfolders. "Include subfolders" carries over. The browser
+  quietly follows to the new folder, so closing the slideshow leaves it showing, and selecting, what you were just
+  viewing. Logic: `Core/FolderNavigator`.
+* **Animated GIFs** - see below.
 
 ## Image formats
 
-Whatever Windows decodes natively: JPEG, PNG, TIFF, BMP and GIF. Animated GIFs play in the slideshow (and an
-auto-advancing slideshow lets each one play through at least once); browser thumbnails show the first frame. Both can
-be switched off under Preferences > Slideshow. HEIC,
-WebP, RAW and JPEG 2000 are **not** supported. `ImageFileTypes.Register(".jp2")` plus a decoder in `ImageService` is the
-extension point for adding more.
+Whatever Windows decodes out of the box: JPEG, PNG, TIFF, BMP and GIF. HEIC, WebP, RAW and JPEG 2000 are **not**
+supported; registering an extension with `ImageFileTypes.Register` and adding a decoder to `ImageService` is the way
+to add one.
+
+**Animated GIFs** play in the slideshow (browser thumbnails show the first frame). When the slideshow advances
+automatically, it waits for each animated GIF to play through at least once. Both behaviours can be switched off
+under Preferences > Slideshow.
 
 ## Packaging a Windows executable
 
@@ -78,24 +103,23 @@ Run from the repository root on Windows with the .NET 10 SDK:
 
 | Output | Needs on the PC | Size |
 |---|---|---|
-| `artifacts\selfcontained\Emberlight.exe` | nothing (64-bit Windows 10/11) | ~70-150 MB |
-| `artifacts\small\Emberlight.exe` | the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) | a few MB |
+| `artifacts\selfcontained\Emberlight.exe` | nothing (64-bit Windows 10/11) | about 60 MB |
+| `artifacts\small\Emberlight.exe` | the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) | under 1 MB |
 
 **Installer (optional).** Install [Inno Setup](https://jrsoftware.org/isinfo.php), run `publish.ps1`, then compile
 `installer\Emberlight.iss`. It produces `artifacts\Emberlight-Setup-<version>.exe`: a per-user install (no admin
 rights), Start Menu and optional desktop shortcuts, and an optional "Open with" entry for JPEG/PNG/TIFF/BMP/GIF. It
-does not change your default image viewer.
+does not change your default image viewer. The installer script has not been tried on Windows yet.
 
-**GitHub release.** Push a tag such as `v0.2.0`; `.github/workflows/release.yml` runs the tests, publishes the
-self-contained build and attaches it to a release as a zip.
+**GitHub release.** Push a tag such as `v0.3.0`; `.github/workflows/release.yml` runs the tests, publishes the
+self-contained build and attaches it to a release as a zip, with release notes generated from the commits.
 
-**Icon and version.** The icon is `src/Emberlight.App/Assets/app.ico` (a generated placeholder; replace it with any
-multi-size .ico). It is used for the .exe, the taskbar and all windows. The version lives in
+**Icon and version.** The icon is `src/Emberlight.App/Assets/app.ico` (16 to 256 px). It is used for the .exe, the
+taskbar, the windows, the About box and the thumbnail loading placeholder. The version lives in
 `src/Emberlight.App/Emberlight.App.csproj` and `installer/Emberlight.iss` - update both when releasing.
 
 Notes: the build is unsigned by default; see "Windows security prompts" below. Trimming is not used because WPF
-doesn't support it. Settings are stored in `%APPDATA%\Emberlight` and survive
-upgrades and uninstalls.
+doesn't support it. Settings are stored in `%APPDATA%\Emberlight` and survive upgrades and uninstalls.
 
 ## Windows security prompts (SmartScreen and Smart App Control)
 
@@ -148,25 +172,25 @@ tests on every push and pull request.
 
 ## Verification status
 
-* **Core: tested.** 137 tests, including a fuzz test of the shuffle bookkeeping against a simple model,
-  pixel-level checks of all eight EXIF orientations against the EXIF spec, parser robustness tests on
-  truncated/corrupted data, and real file-system tests for sorting, scanning and watching.
-* **App: compiled, never run.** The WPF layer was developed on Linux, where WPF cannot run. It was verified by
-  (1) compiling every source file against WPF reference assemblies built from the `dotnet/wpf` repository's
-  reference sources (0 errors) and (2) checking every XAML element, property, event and attached-property name
-  against that same API metadata (0 problems). XAML binding expressions, layout, visuals and runtime
-  behaviour have **not** been exercised. Expect to find and fix bugs on first run.
+* **Core: tested.** 163 tests (listed in `TESTS.md`), including a fuzz test of the shuffle bookkeeping against a
+  simple model, pixel-level checks of all eight EXIF orientations against the EXIF spec, parser robustness tests on
+  truncated or corrupted data, real file-system tests for sorting, scanning and watching, and animated GIF frame
+  composition. Key behaviours are also mutation-checked (the code is deliberately broken to confirm a test fails).
+* **App: used on Windows.** The WPF layer was first written on Linux and only compile-checked, but it has since been
+  run and used on Windows 11, including large folders, network shares, slideshows and the features listed above.
+  There are no automated UI tests, so anything not exercised by hand may still have rough edges.
+* **Builds:** CI builds the whole solution and runs the tests on every push, and the release workflow has produced
+  working releases. The installer script and code signing are untested.
 
 ## Not ported
 
 Lossless pixel rotation (jpegtran), EXIF-thumbnail delete/replace, RAW (dcraw), the update checker, F1-F12 slide
-categories, Finder-alias resolution, localization (6 languages), the app icon and Retina-specific code.
+categories, Finder-alias resolution, localization (6 languages), the original's app icon and Retina-specific code.
 
 ## Known limitations
 
-* The thumbnail grid is virtualized (`VirtualizingGridPanel`): only the rows on screen have containers, and items far
-  from the viewport release their bitmaps. The panel's geometry is unit tested; the panel itself (WPF container
-  generation, scrolling, keyboard navigation) was compiled but not run during development.
 * Slideshow shortcuts assume a US keyboard layout.
+* The Fluent theme that gives Emberlight its light/dark mode is still marked experimental in .NET 10, so a future
+  .NET release could change how the app looks.
 * "Rotate" in the browser edits the EXIF orientation tag (lossless, instant) and only works on files that already
   have that tag.
