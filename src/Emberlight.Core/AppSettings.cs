@@ -23,6 +23,7 @@ public sealed class AppSettings
 {
     public const double MinThumbCellWidth = 40;     // MIN_CELL_WIDTH in the original
     public const double MaxThumbCellWidth = 400;
+    public const double MinInfoPanelWidth = 160;
 
     public string PicturesFolderPath { get; set; } = "";
     public string LastFolderPath { get; set; } = "";
@@ -44,9 +45,11 @@ public sealed class AppSettings
     public bool SlideshowActualSize { get; set; }
     public bool SlideshowWindowFitToImage { get; set; }
     public bool RerandomizeOnLoop { get; set; } = true;
+    public bool SlideshowPlayGifs { get; set; } = true;          // animate GIFs in the slideshow (else first frame)
+    public bool SlideshowGifsFinish { get; set; } = true;        // auto-advance waits for one full play of a GIF
     public bool SuppressLoopIndicator { get; set; }
     public string SlideshowBackgroundColor { get; set; } = "#000000";
-    public string TransparentImageBackgroundColor { get; set; } = "#00000000";
+    public string TransparentImageBackgroundColor { get; set; } = "#FFFFFF";   // white behind transparent areas
 
     public bool OpenFilesDoSlideshow { get; set; } = true;
     public bool OpenFilesIgnoreAutoAdvance { get; set; }
@@ -61,6 +64,7 @@ public sealed class AppSettings
     public double MainWindowWidth { get; set; } = 1100;
     public double MainWindowHeight { get; set; } = 720;
     public double FolderTreeWidth { get; set; } = 240;
+    public double InfoPanelWidth { get; set; } = 280;
     public bool IncludeSubfolders { get; set; }
     public SubfolderMode IncludeSubfoldersMode { get; set; } = SubfolderMode.ResetOnNewTree;
     public bool InfoPanelMoreExif { get; set; }
@@ -87,13 +91,14 @@ public sealed class AppSettings
         if (!double.IsFinite(MainWindowHeight) || MainWindowHeight < 300) MainWindowHeight = 720;
         if (!double.IsFinite(FolderTreeWidth)) FolderTreeWidth = 240;
         FolderTreeWidth = Math.Clamp(FolderTreeWidth, 120, 600);
+        InfoPanelWidth = double.IsFinite(InfoPanelWidth) ? Math.Clamp(InfoPanelWidth, MinInfoPanelWidth, 800) : 280;
         SlideshowInfoMode = Math.Clamp(SlideshowInfoMode, 0, 2);
         if (!Enum.IsDefined(IncludeSubfoldersMode)) IncludeSubfoldersMode = SubfolderMode.ResetOnNewTree;
         IgnoredFileTypes ??= new();
         PicturesFolderPath ??= "";
         LastFolderPath ??= "";
         SlideshowBackgroundColor ??= "#000000";
-        TransparentImageBackgroundColor ??= "#00000000";
+        TransparentImageBackgroundColor ??= "#FFFFFF";
     }
 }
 

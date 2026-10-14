@@ -57,6 +57,9 @@ public sealed class ImageFileTypes
     public static bool IsJpeg(string path)
         => Path.GetExtension(path).ToLowerInvariant() is ".jpg" or ".jpeg" or ".jpe" or ".jfif";
 
+    /// <summary>GIF files, which may be animated.</summary>
+    public static bool IsGif(string path) => Path.GetExtension(path).Equals(".gif", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Files whose EXIF can be read by <see cref="ExifReader"/>.</summary>
     public static bool MayHaveExif(string path)
         => Path.GetExtension(path).ToLowerInvariant() is ".jpg" or ".jpeg" or ".jpe" or ".jfif" or ".tif" or ".tiff" or ".png";

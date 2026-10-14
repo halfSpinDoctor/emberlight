@@ -486,6 +486,10 @@ internal static class CoreTests
         {
             T.True(ImageFileTypes.IsJpeg("a.JPG")); T.True(ImageFileTypes.IsJpeg("a.jpeg")); T.True(!ImageFileTypes.IsJpeg("a.png"));
         });
+        T.Run("IsGif", () =>
+        {
+            T.True(ImageFileTypes.IsGif("a.gif")); T.True(ImageFileTypes.IsGif("pics/B.GIF")); T.True(!ImageFileTypes.IsGif("gif.png"));
+        });
     }
 
     private static bool AppSettingsStoreMigrate(string newPath, string legacyPath) => SettingsStore.MigrateLegacy(newPath, legacyPath);
@@ -503,6 +507,9 @@ internal static class CoreTests
             T.Eq(new SortOrder(SortField.Name, false), s.SortOrder);
             T.Eq(SubfolderMode.ResetOnNewTree, s.IncludeSubfoldersMode, "the behaviour before this setting existed");
             T.True(!s.IncludeSubfolders && !s.InfoPanelMoreExif);
+            T.True(s.SlideshowPlayGifs && s.SlideshowGifsFinish, "animated GIFs play, and finish before auto-advance");
+            T.Eq("#FFFFFF", s.TransparentImageBackgroundColor, "white behind transparent pictures");
+            T.Eq(280.0, s.InfoPanelWidth);
         });
         T.Run("sort order legacy encoding round-trips", () =>
         {
@@ -519,7 +526,8 @@ internal static class CoreTests
             using var d = new TempDir();
             string p = d.File("sub/settings.json");
             var s = new AppSettings { ThumbCellWidth = 200, LastFolderPath = @"C:\Pics", SlideshowLoop = true,
-                                      IncludeSubfoldersMode = SubfolderMode.Always, InfoPanelMoreExif = true };
+                                      IncludeSubfoldersMode = SubfolderMode.Always, InfoPanelMoreExif = true,
+                                      SlideshowPlayGifs = false, SlideshowGifsFinish = false };
             s.SortOrder = new SortOrder(SortField.Size, true);
             s.IgnoredFileTypes.Add(".bmp");
             T.True(SettingsStore.Save(s, p));
@@ -529,6 +537,7 @@ internal static class CoreTests
             T.Eq(new SortOrder(SortField.Size, true), l.SortOrder);
             T.SeqEq(new[] { ".bmp" }, l.IgnoredFileTypes);
             T.Eq(SubfolderMode.Always, l.IncludeSubfoldersMode); T.True(l.InfoPanelMoreExif);
+            T.True(!l.SlideshowPlayGifs && !l.SlideshowGifsFinish);
         });
         T.Run("settings from the old app name are copied across once, and never overwrite newer ones", () =>
         {
@@ -562,12 +571,14 @@ internal static class CoreTests
             T.Eq(120.0, SettingsStore.Load(d.File("bad.json")).ThumbCellWidth);
             File.WriteAllText(d.File("null.json"), "null");
             T.Eq(120.0, SettingsStore.Load(d.File("null.json")).ThumbCellWidth);
-            File.WriteAllText(d.File("wild.json"), "{\"ThumbCellWidth\": 99999, \"SlideshowAutoAdvanceSeconds\": -3, \"SortBy\": 42, \"MaxThumbsToLoad\": 0, \"IgnoredFileTypes\": null, \"IncludeSubfoldersMode\": 7}");
+            File.WriteAllText(d.File("wild.json"), "{\"ThumbCellWidth\": 99999, \"SlideshowAutoAdvanceSeconds\": -3, \"SortBy\": 42, \"MaxThumbsToLoad\": 0, \"IgnoredFileTypes\": null, \"IncludeSubfoldersMode\": 7, \"TransparentImageBackgroundColor\": null, \"InfoPanelWidth\": 5}");
             var s = SettingsStore.Load(d.File("wild.json"));
             T.Eq(AppSettings.MaxThumbCellWidth, s.ThumbCellWidth);
             T.Eq(5.5, s.SlideshowAutoAdvanceSeconds);
             T.Eq(1, s.SortBy); T.Eq(1, s.MaxThumbsToLoad); T.True(s.IgnoredFileTypes != null);
             T.Eq(SubfolderMode.ResetOnNewTree, s.IncludeSubfoldersMode, "unknown mode");
+            T.Eq("#FFFFFF", s.TransparentImageBackgroundColor, "missing colour");
+            T.Eq(AppSettings.MinInfoPanelWidth, s.InfoPanelWidth, "info panel too narrow");
         });
     }
 }

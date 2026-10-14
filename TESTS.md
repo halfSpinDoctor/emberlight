@@ -104,21 +104,22 @@ EXIF orientation values 1-8, modelled as a flip plus a rotation.
 - **register / disable / ignored list**: New extensions can be added, and built-in ones can be turned off by
   Preferences or the ignored-types list and turned back on.
 - **IsJpeg**: Recognises `.jpg`/`.jpeg` (any case) and nothing else.
+- **IsGif**: Recognises `.gif` in any case, and not a name that merely contains "gif".
 
 ### Settings
 - **defaults match the original app's registered defaults**: A fresh `AppSettings` starts with the same defaults as
   Phoenix Slides (thumbnail size, slideshow timing, flags, sort order). Include subfolders starts off and resets when
-  changing folder trees, and "More EXIF details" starts off.
+  changing folder trees, "More EXIF details" starts off, animated GIFs play and finish before auto-advance, transparent areas show white, and the info panel is 280 px wide.
 - **sort order legacy encoding round-trips**: The original's signed-integer sort code converts back and forth exactly,
   and unknown codes fall back to Name ascending.
 - **save and load round trip; no temp file left behind**: Saved settings load back unchanged (including the
-  subfolder mode and "More EXIF details"), and the atomic save leaves no `.tmp` file behind.
+  subfolder mode, "More EXIF details" and the two GIF options), and the atomic save leaves no `.tmp` file behind.
 - **settings from the old app name are copied across once, and never overwrite newer ones**: Settings in the old
   `PhoenixSlides` folder are copied over once, the old file is kept, and the copy never overwrites newer settings.
 - **the legacy location is the old folder name and differs from the new one**: The old settings path uses
   `PhoenixSlides`, the new one uses `Emberlight`, and the two are different.
 - **missing, corrupt or hostile files fall back to sane values**: A missing file, invalid JSON, `null`, or values
-  out of range (including an unknown subfolder mode) all give defaults or clamped values instead of crashing.
+  out of range (including an unknown subfolder mode and a too-narrow info panel) all give defaults or clamped values instead of crashing.
 
 ---
 
@@ -317,6 +318,28 @@ The mouse wheel in the slideshow: one notch moves one slide.
   remainder carries over.
 - **reversing direction or resetting drops partial movement**: A partial scroll is forgotten when the direction
   reverses or the stepper is reset; zero does nothing.
+
+### GifCompositor
+Animated GIF playback: painting each frame onto the canvas the way the GIF asks. The tests use tiny frames and show the
+canvas as text, one digit per pixel ("." = transparent).
+
+- **a frame smaller than the canvas is drawn at its offset; the rest stays transparent**: A 2x1 frame at (1,1) lands
+  there on a 4x3 canvas.
+- **Keep: the next frame is drawn over the last, and its transparent pixels show what is underneath**: A frame with
+  a transparent hole lets the previous frame show through it.
+- **RestoreBackground clears the frame's own rectangle before the next frame**: Only that frame's area becomes
+  transparent; the rest is kept.
+- **RestorePrevious puts back the canvas from before the frame**: The frame is undone before the next one is drawn.
+- **after the last frame it loops to the first on a clear canvas, for ever**: Looping starts from an empty canvas
+  and keeps going indefinitely.
+- **frames hanging off the canvas are clipped, including when disposed**: Frames at negative positions or larger
+  than the canvas are drawn and cleared without errors.
+- **delays: hundredths of a second, with 0 and 1 treated as 100 ms like browsers do**: Delay conversion, including
+  the browser rule for very short delays.
+- **one play-through lasts the sum of the frame delays**: `Duration` adds the delays (with the 100 ms rule), which is
+  how long auto-advance waits on an animated GIF.
+- **an empty canvas, no frames or pixel data of the wrong size are rejected**: Invalid animations throw instead of
+  misbehaving later; `FrameBytes` adds up the frames' pixel data.
 
 ---
 

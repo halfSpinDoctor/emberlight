@@ -49,6 +49,7 @@ public partial class SlideshowWindow : Window
     private readonly AppSettings _settings;
     private readonly SlideshowState _state;
     private readonly WheelStepper _wheel = new();      // mouse wheel: one notch = one slide
+    private GifPlayer? _gif;                           // the animated GIF on screen, if any
     private readonly DispatcherTimer _timer = new();
     private readonly LruCache<string, LoadedImage> _cache = new(5, comparer: StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _preloading = new(StringComparer.OrdinalIgnoreCase);
@@ -131,7 +132,7 @@ public partial class SlideshowWindow : Window
             Focus();
             _ = DisplayCurrentAsync();
         };
-        Closed += (_, _) => { _closed = true; _timer.Stop(); _toastTimer.Stop(); };
+        Closed += (_, _) => { _closed = true; _timer.Stop(); _toastTimer.Stop(); StopGif(); };
     }
 
     // ============================================================================================
@@ -146,6 +147,7 @@ public partial class SlideshowWindow : Window
         {
             if (_state.IsPastEnd)
             {
+                StopGif();
                 Viewer.Clear();
                 _current = null;
                 ShowMessage(_state.Files.Count == 0 ? "No images" : "No more images\n(press \u2190 or Esc)");
@@ -159,7 +161,7 @@ public partial class SlideshowWindow : Window
             if (!_cache.TryGet(path, out var img) || !IsFresh(img, path))
             {
                 int decode = DecodeTarget();
-                img = await Task.Run(() => version != _displayVersion ? null : ImageService.LoadDisplay(path, decode, () => version != _displayVersion));
+                img = await Task.Run(() => version != _displayVersion ? null : ImageService.LoadDisplay(path, decode, () => version != _displayVersion, _settings.SlideshowPlayGifs));
                 if (version != _displayVersion) return;     // the user has already moved on
                 if (img != null) _cache.Set(path, img);
             }
@@ -175,8 +177,15 @@ public partial class SlideshowWindow : Window
         }
     }
 
+    private void StopGif()
+    {
+        _gif?.Dispose();
+        _gif = null;
+    }
+
     private void ShowLoaded(string path, LoadedImage? img)
     {
+        StopGif();
         _current = img;
         if (img == null)
         {
@@ -192,6 +201,12 @@ public partial class SlideshowWindow : Window
             ?? (_settings.AutoRotateByOrientationTag ? img.ExifOrientation : ImageOrientation.Identity);
         FitWindowToImage(img, orientation);
         Viewer.SetImage(img.Bitmap, img.PixelWidth, img.PixelHeight, orientation, saved?.Zoom);
+        if (img.Animation is { } animation)
+        {
+            _gif = new GifPlayer(animation);
+            Viewer.ReplaceBitmap(_gif.Bitmap);     // same size as the first frame, so the view stays as it is
+            _gif.Start();
+        }
 
         if (!_fullScreen) Title = Path.GetFileName(path) + " \u2014 Emberlight";
         UpdateInfo();
@@ -233,7 +248,7 @@ public partial class SlideshowWindow : Window
     {
         try
         {
-            var full = await Task.Run(() => ImageService.LoadDisplay(path, 0));
+            var full = await Task.Run(() => ImageService.LoadDisplay(path, 0, animateGifs: _settings.SlideshowPlayGifs));
             if (full == null) return;
             _cache.Set(path, full);
             if (version != _displayVersion || !string.Equals(_state.CurrentFile, path, StringComparison.OrdinalIgnoreCase)) return;
@@ -273,7 +288,7 @@ public partial class SlideshowWindow : Window
             {
                 try
                 {
-                    var li = ImageService.LoadDisplay(p, decode);
+                    var li = ImageService.LoadDisplay(p, decode, animateGifs: _settings.SlideshowPlayGifs);
                     if (li != null) _cache.Set(p, li);   // the cache is thread-safe and the bitmap is frozen
                 }
                 finally
@@ -302,7 +317,11 @@ public partial class SlideshowWindow : Window
     {
         _timer.Stop();
         if (!_state.IsTimerActive) return;
-        _timer.Interval = TimeSpan.FromSeconds(_state.AutoAdvanceSeconds);
+        // An animated GIF gets to play through at least once before the slideshow moves on (a preference).
+        var interval = TimeSpan.FromSeconds(_state.AutoAdvanceSeconds);
+        if (_settings.SlideshowGifsFinish && _current?.Animation is { } animation && animation.Duration > interval)
+            interval = animation.Duration;
+        _timer.Interval = interval;
         _timer.Start();
     }
 

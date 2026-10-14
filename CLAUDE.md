@@ -48,7 +48,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~153 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~163 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.
@@ -56,8 +56,20 @@ are timing based and could be flaky on a loaded CI machine.
   reported so far, but it is the most intricate piece of UI code.
 
 ## Behaviour decisions made with the user (keep these)
-- **Image formats:** whatever WIC decodes natively (JPEG, PNG, TIFF, BMP, static GIF). HEIC, WebP, animated GIF,
-  RAW and JPEG 2000 are intentionally out of scope for now.
+- **Image formats:** whatever WIC decodes natively (JPEG, PNG, TIFF, BMP, GIF). HEIC, WebP, RAW and JPEG 2000 are
+  intentionally out of scope for now.
+- **Animated GIFs** play in the slideshow only (thumbnails show the first frame). WIC gives the frames and metadata
+  (`ImageService.LoadGifAnimation`); `GifCompositor` (Core) composes them following each frame's disposal, delays of
+  0-1 become 100 ms (as browsers do), and it loops forever. `GifPlayer` shows the frames in one `WriteableBitmap`
+  through `Viewer.ReplaceBitmap`, so zoom/pan/rotate keep working. Auto-advance waits at least one play-through
+  (`GifAnimation.Duration`). Both are preferences on the Slideshow tab, on by default: "Play animated GIFs"
+  (`SlideshowPlayGifs`; off = first frame only, and the frames aren't loaded at all) and, indented under it, "Let GIFs
+  finish before auto-advancing" (`SlideshowGifsFinish`). The user chose the Slideshow tab over a separate GIF tab.
+- **Info panel width** is adjustable with a splitter (`InfoSplitter`, hidden with the panel), like the folder tree's,
+  and saved as `AppSettings.InfoPanelWidth` (default 280, kept within 160-800) when the panel is hidden and at exit.
+- **Behind transparent pictures** defaults to white (`#FFFFFF`; it was `#00000000`, i.e. the black slideshow
+  background showed through). Only affects new settings files; a saved colour is kept. GIFs whose frames would exceed 256 MB are shown still. WPF's `GifBitmapEncoder` ignores
+  frame metadata (delay, disposal, position), so test GIFs must be patched by hand.
 - **Include subfolders** (checkbox in the status bar + View menu): by default stays on while browsing inside the folder
   tree where it was switched on and switches off when you pick a folder outside that tree. Preferences > View lets the
   user choose "Always" instead (`AppSettings.IncludeSubfoldersMode`, `PathUtil.SubfoldersStayOn`); this choice is
@@ -130,7 +142,7 @@ are timing based and could be flaky on a loaded CI machine.
   sort item's `Icon` (set in `SyncMenuState`), bound into the template's `CheckBoxIcon`.
   Preferences uses 12 px text too, with slimmer fields and 13 px group headings (styles in `PreferencesWindow.xaml`'s
   resources), but check box and radio rows keep Fluent's 32 px height: the user found tighter rows too cramped. The
-  window is 520 x 540 (was 560 x 640), sized to the tallest tab (Slideshow); if a tab gains rows, check it still fits.
+  window is 520 x 612 (was 560 x 640), sized to the tallest tab (Slideshow); if a tab gains rows, check it still fits.
 - `TreeViewItem.BringIntoView()` right after adding rows does nothing useful (they aren't laid out yet); defer it with
   `Dispatcher.BeginInvoke(DispatcherPriority.Loaded, ...)`, as `SelectPathInTreeAsync` does.
 

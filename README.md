@@ -64,8 +64,10 @@ The core tests also run on Linux/macOS.
 
 ## Image formats
 
-Whatever Windows decodes natively: JPEG, PNG, TIFF, BMP, and (static) GIF. HEIC, WebP, animated GIF, RAW and
-JPEG 2000 are **not** supported. `ImageFileTypes.Register(".jp2")` plus a decoder in `ImageService` is the
+Whatever Windows decodes natively: JPEG, PNG, TIFF, BMP and GIF. Animated GIFs play in the slideshow (and an
+auto-advancing slideshow lets each one play through at least once); browser thumbnails show the first frame. Both can
+be switched off under Preferences > Slideshow. HEIC,
+WebP, RAW and JPEG 2000 are **not** supported. `ImageFileTypes.Register(".jp2")` plus a decoder in `ImageService` is the
 extension point for adding more.
 
 ## Packaging a Windows executable

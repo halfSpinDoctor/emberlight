@@ -160,6 +160,7 @@ public partial class MainWindow : Window
             _settings.MainWindowHeight = ActualHeight;
         }
         if (TreeColumn.ActualWidth > 0) _settings.FolderTreeWidth = TreeColumn.ActualWidth;
+        if (InfoPanel.Visibility == Visibility.Visible && InfoColumn.ActualWidth > 0) _settings.InfoPanelWidth = InfoColumn.ActualWidth;
         _settings.IgnoredFileTypes = _types.DisabledExtensions.ToList();
     }
 
@@ -724,8 +725,13 @@ public partial class MainWindow : Window
 
     private void SetInfoPanelVisible(bool visible)
     {
+        // The panel's width is the user's (dragged with InfoSplitter); remember it when the panel is hidden.
+        if (!visible && InfoPanel.Visibility == Visibility.Visible && InfoColumn.ActualWidth > 0)
+            _settings.InfoPanelWidth = InfoColumn.ActualWidth;
         InfoPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        InfoColumn.Width = new GridLength(visible ? 280 : 0);
+        InfoSplitter.Visibility = InfoPanel.Visibility;
+        InfoColumn.MinWidth = visible ? AppSettings.MinInfoPanelWidth : 0;
+        InfoColumn.Width = new GridLength(visible ? _settings.InfoPanelWidth : 0);
         _settings.InfoPanelVisible = visible;
         MenuInfoPanel.IsChecked = visible;
         UpdateInfoPanel();

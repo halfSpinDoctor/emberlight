@@ -222,6 +222,98 @@ internal static class SlideshowTests
         });
 
         WheelTests();
+        GifTests();
+    }
+
+    // A frame filled with one "colour" (stored in the blue byte), or transparent where colour is -1.
+    static GifFrame Frame(int left, int top, int w, int h, int colour, GifDisposal disposal = GifDisposal.Keep, int delay = 10)
+    {
+        var px = new byte[w * h * 4];
+        if (colour >= 0)
+            for (int i = 0; i < px.Length; i += 4) { px[i] = (byte)colour; px[i + 3] = 255; }
+        return new GifFrame(left, top, w, h, delay, disposal, px);
+    }
+
+    // The canvas as rows of colours ('.' = transparent, otherwise the colour's digit), for readable assertions.
+    static string Rows(GifCompositor c, int w, int h)
+    {
+        var sb = new System.Text.StringBuilder();
+        for (int y = 0; y < h; y++)
+        {
+            if (y > 0) sb.Append('|');
+            for (int x = 0; x < w; x++)
+            {
+                int i = (y * w + x) * 4;
+                sb.Append(c.Canvas[i + 3] == 0 ? '.' : (char)('0' + c.Canvas[i]));
+            }
+        }
+        return sb.ToString();
+    }
+
+    static void GifTests()
+    {
+        T.Group("GifCompositor");
+        T.Run("a frame smaller than the canvas is drawn at its offset; the rest stays transparent", () =>
+        {
+            var c = new GifCompositor(new GifAnimation(4, 3, [Frame(1, 1, 2, 1, 5)]));
+            T.Eq("....|.55.|....", Rows(c, 4, 3));
+        });
+        T.Run("Keep: the next frame is drawn over the last, and its transparent pixels show what is underneath", () =>
+        {
+            var hole = Frame(0, 0, 3, 1, 2);
+            hole.Bgra[4 + 3] = 0;                                   // middle pixel transparent
+            var c = new GifCompositor(new GifAnimation(3, 1, [Frame(0, 0, 3, 1, 1), hole]));
+            c.Advance();
+            T.Eq("212", Rows(c, 3, 1));
+        });
+        T.Run("RestoreBackground clears the frame's own rectangle before the next frame", () =>
+        {
+            var c = new GifCompositor(new GifAnimation(3, 1,
+                [Frame(0, 0, 3, 1, 1), Frame(1, 0, 1, 1, 2, GifDisposal.RestoreBackground), Frame(0, 0, 1, 1, 3)]));
+            c.Advance(); T.Eq("121", Rows(c, 3, 1));
+            c.Advance(); T.Eq("3.1", Rows(c, 3, 1), "frame 2's pixel was cleared, the rest kept");
+        });
+        T.Run("RestorePrevious puts back the canvas from before the frame", () =>
+        {
+            var c = new GifCompositor(new GifAnimation(2, 1,
+                [Frame(0, 0, 2, 1, 1), Frame(0, 0, 2, 1, 2, GifDisposal.RestorePrevious), Frame(1, 0, 1, 1, 3)]));
+            c.Advance(); T.Eq("22", Rows(c, 2, 1));
+            c.Advance(); T.Eq("13", Rows(c, 2, 1), "frame 1 undone, then frame 2 drawn");
+        });
+        T.Run("after the last frame it loops to the first on a clear canvas, for ever", () =>
+        {
+            var c = new GifCompositor(new GifAnimation(2, 1, [Frame(0, 0, 1, 1, 1), Frame(1, 0, 1, 1, 2)]));
+            c.Advance(); T.Eq("12", Rows(c, 2, 1));
+            c.Advance(); T.Eq(0, c.FrameIndex); T.Eq("1.", Rows(c, 2, 1), "frame 2's pixel is gone after the loop");
+            for (int i = 0; i < 101; i++) c.Advance();
+            T.Eq(1, c.FrameIndex);
+        });
+        T.Run("frames hanging off the canvas are clipped, including when disposed", () =>
+        {
+            var c = new GifCompositor(new GifAnimation(2, 2,
+                [Frame(-1, -1, 2, 2, 4, GifDisposal.RestoreBackground), Frame(1, 1, 5, 5, 6)]));
+            T.Eq("4.|..", Rows(c, 2, 2));
+            c.Advance(); T.Eq("..|.6", Rows(c, 2, 2));
+        });
+        T.Run("delays: hundredths of a second, with 0 and 1 treated as 100 ms like browsers do", () =>
+        {
+            T.Eq(100.0, Frame(0, 0, 1, 1, 1, delay: 0).Delay.TotalMilliseconds);
+            T.Eq(100.0, Frame(0, 0, 1, 1, 1, delay: 1).Delay.TotalMilliseconds);
+            T.Eq(20.0, Frame(0, 0, 1, 1, 1, delay: 2).Delay.TotalMilliseconds);
+            T.Eq(500.0, Frame(0, 0, 1, 1, 1, delay: 50).Delay.TotalMilliseconds);
+        });
+        T.Run("one play-through lasts the sum of the frame delays", () =>
+        {
+            var anim = new GifAnimation(1, 1, [Frame(0, 0, 1, 1, 1, delay: 50), Frame(0, 0, 1, 1, 2, delay: 0), Frame(0, 0, 1, 1, 3, delay: 25)]);
+            T.Eq(850.0, anim.Duration.TotalMilliseconds, "500 + 100 (a zero delay) + 250");
+        });
+        T.Run("an empty canvas, no frames or pixel data of the wrong size are rejected", () =>
+        {
+            T.Throws<ArgumentOutOfRangeException>(() => new GifAnimation(0, 1, [Frame(0, 0, 1, 1, 1)]));
+            T.Throws<ArgumentException>(() => new GifAnimation(1, 1, []));
+            T.Throws<ArgumentException>(() => new GifAnimation(1, 1, [new GifFrame(0, 0, 2, 2, 0, GifDisposal.Keep, new byte[4])]));
+            T.Eq(8L, new GifAnimation(2, 1, [Frame(0, 0, 1, 1, 1), Frame(1, 0, 1, 1, 2)]).FrameBytes);
+        });
     }
 
     static void WheelTests()

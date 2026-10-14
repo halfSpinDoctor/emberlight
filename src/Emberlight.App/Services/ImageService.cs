@@ -10,9 +10,11 @@ namespace Emberlight.App.Services;
 /// <summary>A decoded picture plus the facts the UI needs about the file it came from.</summary>
 /// <param name="Bitmap">Frozen bitmap. May be a reduced-size decode; see <paramref name="IsFullResolution"/>.</param>
 /// <param name="PixelWidth">Pixel width of the *file's* image (not necessarily of <paramref name="Bitmap"/>).</param>
+/// <param name="Animation">For an animated GIF, its frames (<paramref name="Bitmap"/> is then the first one, composed).</param>
 public sealed record LoadedImage(
     BitmapSource Bitmap, int PixelWidth, int PixelHeight,
-    ImageOrientation ExifOrientation, bool IsFullResolution, long FileSize, DateTime ModifiedUtc);
+    ImageOrientation ExifOrientation, bool IsFullResolution, long FileSize, DateTime ModifiedUtc,
+    GifAnimation? Animation = null);
 
 /// <summary>
 /// Image decoding via Windows' built-in imaging stack (WIC, through WPF's BitmapDecoder).
@@ -109,9 +111,11 @@ public static class ImageService
     /// Loads a picture for viewing. With <paramref name="maxDecodeDimension"/> &gt; 0 and a bigger source, the
     /// decoder scales while reading (fast, and far less memory than a full 24-megapixel bitmap); pass 0 for
     /// full resolution. <paramref name="isCancelled"/> is polled before the expensive work so queued
-    /// requests for slides the user has already skipped past cost almost nothing.
+    /// requests for slides the user has already skipped past cost almost nothing. With <paramref name="animateGifs"/>,
+    /// an animated GIF comes back with all its frames so it can be played; otherwise just its first frame.
     /// </summary>
-    public static LoadedImage? LoadDisplay(string path, int maxDecodeDimension, Func<bool>? isCancelled = null)
+    public static LoadedImage? LoadDisplay(string path, int maxDecodeDimension, Func<bool>? isCancelled = null,
+        bool animateGifs = true)
     {
         try
         {
@@ -119,6 +123,17 @@ public static class ImageService
             var fi = new FileInfo(path);
             if (!fi.Exists) return null;
             if (!TryReadSize(path, out int pw, out int ph)) return null;
+
+            // Animated GIFs are kept at full size with all their frames; the slideshow plays them.
+            if (animateGifs && ImageFileTypes.IsGif(path) && LoadGifAnimation(path) is { } anim)
+            {
+                var first = new GifCompositor(anim);
+                var bitmap = BitmapSource.Create(anim.Width, anim.Height, 96, 96, PixelFormats.Bgra32, null, first.Canvas, first.Stride);
+                bitmap.Freeze();
+                return new LoadedImage(bitmap, anim.Width, anim.Height, ImageOrientation.Identity, true,
+                    fi.Length, fi.LastWriteTimeUtc, anim);
+            }
+
             var exif = ImageOrientation.FromExif(ExifReader.GetOrientation(path));
             if (isCancelled?.Invoke() == true) return null;
 
@@ -130,6 +145,60 @@ public static class ImageService
         {
             return null;
         }
+    }
+
+    /// <summary>Animated GIFs whose frames would need more memory than this are shown as still pictures.</summary>
+    private const long MaxGifFrameBytes = 256L * 1024 * 1024;
+
+    /// <summary>
+    /// Reads an animated GIF's frames and the metadata needed to play them (position, delay, disposal; canvas size).
+    /// Null for a GIF with a single frame (shown like any other picture), one too big to hold in memory, or one the
+    /// decoder can't read.
+    /// </summary>
+    public static GifAnimation? LoadGifAnimation(string path)
+    {
+        try
+        {
+            using var fs = OpenRead(path);
+            var decoder = new GifBitmapDecoder(fs, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+            if (decoder.Frames.Count < 2) return null;
+
+            var frames = new List<GifFrame>(decoder.Frames.Count);
+            long bytes = 0;
+            int right = 0, bottom = 0;
+            foreach (var f in decoder.Frames)
+            {
+                var md = f.Metadata as BitmapMetadata;
+                int left = QueryInt(md, "/imgdesc/Left"), top = QueryInt(md, "/imgdesc/Top");
+                int w = f.PixelWidth, h = f.PixelHeight;
+                bytes += (long)w * h * 4;
+                if (bytes > MaxGifFrameBytes) return null;
+
+                var px = new byte[w * h * 4];
+                new FormatConvertedBitmap(f, PixelFormats.Bgra32, null, 0).CopyPixels(px, w * 4, 0);   // transparent -> alpha 0
+                int disposal = QueryInt(md, "/grctlext/Disposal");
+                frames.Add(new GifFrame(left, top, w, h, QueryInt(md, "/grctlext/Delay"),
+                    disposal is >= 0 and <= 3 ? (GifDisposal)disposal : GifDisposal.Unspecified, px));
+                right = Math.Max(right, left + w);
+                bottom = Math.Max(bottom, top + h);
+            }
+
+            // The canvas ("logical screen") size is in the file header; fall back to the frames' extent if it's missing.
+            var header = decoder.Metadata;
+            int width = QueryInt(header, "/logscrdesc/Width"), height = QueryInt(header, "/logscrdesc/Height");
+            if (width <= 0 || height <= 0) (width, height) = (right, bottom);
+            return new GifAnimation(width, height, frames);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static int QueryInt(BitmapMetadata? metadata, string query)
+    {
+        try { return metadata?.GetQuery(query) is { } value ? Convert.ToInt32(value, CultureInfo.InvariantCulture) : 0; }
+        catch (Exception) { return 0; }          // a missing or unreadable field
     }
 
     // ---- thumbnails -----------------------------------------------------------------------

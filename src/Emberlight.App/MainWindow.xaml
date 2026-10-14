@@ -157,6 +157,7 @@
                 <ColumnDefinition x:Name="TreeColumn" Width="240" MinWidth="120"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*" MinWidth="200"/>
+                <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition x:Name="InfoColumn" Width="0"/>
             </Grid.ColumnDefinitions>
 
@@ -200,7 +201,12 @@
                 </ListBox.ItemsPanel>
             </ListBox>
 
-            <Border x:Name="InfoPanel" Grid.Column="3" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}" BorderThickness="1,0,0,0"
+            <!-- Resizes the info panel, like the splitter beside the folder tree; hidden with the panel. -->
+            <GridSplitter x:Name="InfoSplitter" Grid.Column="3" Width="5" HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch" Background="Transparent" ResizeBehavior="PreviousAndNext"
+                          Visibility="Collapsed"/>
+
+            <Border x:Name="InfoPanel" Grid.Column="4" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}" BorderThickness="1,0,0,0"
                     Visibility="Collapsed">
                 <DockPanel>
                     <TextBlock x:Name="InfoHeader" DockPanel.Dock="Top" FontWeight="SemiBold" Margin="10,10,10,4"

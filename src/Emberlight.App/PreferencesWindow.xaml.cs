@@ -58,6 +58,8 @@ public partial class PreferencesWindow : Window
         ScaleUp.IsChecked = settings.SlideshowScaleUp;
         ActualSize.IsChecked = settings.SlideshowActualSize;
         FitWindow.IsChecked = settings.SlideshowWindowFitToImage;
+        PlayGifs.IsChecked = settings.SlideshowPlayGifs;
+        GifsFinish.IsChecked = settings.SlideshowGifsFinish;
         BackgroundColor.Text = settings.SlideshowBackgroundColor;
         TransparentColor.Text = settings.TransparentImageBackgroundColor;
 
@@ -122,6 +124,8 @@ public partial class PreferencesWindow : Window
         _settings.SlideshowScaleUp = ScaleUp.IsChecked == true;
         _settings.SlideshowActualSize = ActualSize.IsChecked == true;
         _settings.SlideshowWindowFitToImage = FitWindow.IsChecked == true;
+        _settings.SlideshowPlayGifs = PlayGifs.IsChecked == true;
+        _settings.SlideshowGifsFinish = GifsFinish.IsChecked == true;
         _settings.SlideshowBackgroundColor = BackgroundColor.Text.Trim();
         _settings.TransparentImageBackgroundColor = TransparentColor.Text.Trim();
 
