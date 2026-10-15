@@ -36,22 +36,19 @@ public partial class MainWindow : Window
     private readonly string? _startPath;
     private readonly ImageFileTypes _types = new();
     private readonly DirectoryScanner _scanner;
-    private readonly FileMetadataCache _meta = new();
-    private readonly BulkObservableCollection<ThumbnailItem> _items = new();
-    private readonly Dictionary<string, ThumbnailItem> _itemByPath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly BulkObservableCollection<ThumbnailItem> _items = new();   // what the grid shows; changed through _listing
+    private readonly FileListing<ThumbnailItem> _listing;                     // keeps _items sorted and looks items up by path
+    private readonly SubfolderScope _subfolders;
     private readonly ViewSettings _view = new();
     private readonly ThumbnailLoader _loader;
     private readonly FolderWatcher _watcher;
 
-    private IComparer<string> _comparer;
-    private SortOrder _sortOrder;
     private string? _currentFolder;
     private string? _pendingSelectPath;
     private readonly DispatcherTimer _followTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     private string? _followPath;           // folder the slideshow most recently jumped to; the browser follows after a short pause
     private bool _isLoading;               // a folder navigation is in progress
     private int _keepFirst, _keepEnd;     // items in [_keepFirst, _keepEnd) may hold a decoded thumbnail
-    private string? _subfolderRoot;      // folder at which "Include subfolders" was switched on; it stays on only inside this tree
     private CancellationTokenSource? _scanCts;
     private ScrollViewer? _thumbScroll;
     private bool _suppressTreeNav;
@@ -70,8 +67,8 @@ public partial class MainWindow : Window
 
         _types.ApplyIgnored(settings.IgnoredFileTypes);
         _scanner = new DirectoryScanner(_types);
-        _sortOrder = settings.SortOrder;
-        _comparer = FileComparers.For(_sortOrder, _meta);
+        _listing = new FileListing<ThumbnailItem>(_items, p => new ThumbnailItem(p), i => i.Path, settings.SortOrder, _items.ReplaceAll);
+        _subfolders = new SubfolderScope(settings);
 
         _view.CellWidth = settings.ThumbCellWidth;
         _view.ShowFilenames = settings.ShowFilenames;
@@ -153,7 +150,7 @@ public partial class MainWindow : Window
         if (_currentFolder != null) _settings.LastFolderPath = _currentFolder;
         _settings.ThumbCellWidth = _view.CellWidth;
         _settings.ShowFilenames = _view.ShowFilenames;
-        _settings.SortOrder = _sortOrder;
+        _settings.SortOrder = _listing.Order;
         if (WindowState == WindowState.Normal)
         {
             _settings.MainWindowWidth = ActualWidth;
@@ -407,23 +404,21 @@ public partial class MainWindow : Window
         var cts = _scanCts = new CancellationTokenSource();
         var ct = cts.Token;
 
-        ApplySubfolderPolicy(path);
+        if (_subfolders.BeforeNavigate(_currentFolder, path)) SyncMenuState();   // left the tree: it switched itself off
         _isLoading = true;
         _currentFolder = path;
         _watcher.Stop();
         _loader.Reset();
-        _meta.Clear();
-        _comparer = FileComparers.For(_sortOrder, _meta);
+        _listing.ResetMetadata();
         Title = $"{new DirectoryInfo(path).Name} \u2014 Emberlight";
 
         // Show an empty grid and a busy indicator immediately, so the user can see the click was received.
-        _itemByPath.Clear();
         _keepFirst = _keepEnd = 0;
-        _items.ReplaceAll(Array.Empty<ThumbnailItem>());
+        _listing.Clear();
         SlideshowButton.IsEnabled = false;
         BeginBusy("Scanning folder\u2026");
 
-        var comparer = _comparer;
+        var comparer = _listing.Comparer;
         bool recurse = _settings.IncludeSubfolders;
         // Progress<T> captures the UI context, so this callback runs on the UI thread.
         var scanProgress = new Progress<int>(n =>
@@ -438,7 +433,7 @@ public partial class MainWindow : Window
             if (ct.IsCancellationRequested) return;
 
             // Sorting by a file-system or EXIF date has to open every file, which can take a while.
-            BeginBusy(NeedsFileInspection(_sortOrder)
+            BeginBusy(_listing.Order.NeedsFileInspection
                 ? $"Sorting {files.Count:N0} images\u2026"
                 : $"Preparing {files.Count:N0} images\u2026");
             await Task.Run(() => files.Sort(comparer), ct);
@@ -458,7 +453,7 @@ public partial class MainWindow : Window
         Populate(files);
 
         _watcher.Watch(path, recurse);
-        if (_pendingSelectPath != null && _itemByPath.TryGetValue(_pendingSelectPath, out var wanted))
+        if (_pendingSelectPath != null && _listing.TryGet(_pendingSelectPath, out var wanted))
         {
             ThumbList.SelectedItem = wanted;
             ThumbList.ScrollIntoView(wanted);
@@ -475,21 +470,11 @@ public partial class MainWindow : Window
     /// </summary>
     private void Populate(List<string> files)
     {
-        var items = new List<ThumbnailItem>(files.Count);
-        foreach (var f in files)
-        {
-            var item = new ThumbnailItem(f);
-            _itemByPath[f] = item;
-            items.Add(item);
-        }
         _keepFirst = _keepEnd = 0;
-        _items.ReplaceAll(items);
+        _listing.Populate(files);
         UpdateVisibleThumbnails();       // start loading the first screenful straight away
         _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(UpdateVisibleThumbnails));   // and again once layout has run
     }
-
-    private static bool NeedsFileInspection(SortOrder order)
-        => order.Key is not (SortField.Name or SortField.FilePath or SortField.Type);
 
     // ---- busy indicator in the status bar ----
 
@@ -569,23 +554,6 @@ public partial class MainWindow : Window
 
     private void EndBusy() => BusyItem.Visibility = Visibility.Collapsed;
 
-    /// <summary>
-    /// "Include subfolders" stays on while you browse within the tree where you switched it on, and is
-    /// switched off when you move to a folder outside that tree, unless the preference says to keep it on.
-    /// </summary>
-    private void ApplySubfolderPolicy(string newPath)
-    {
-        if (!_settings.IncludeSubfolders) { _subfolderRoot = null; return; }
-
-        // First navigation of the session (a remembered "on" from last time): the start folder is the tree root.
-        _subfolderRoot ??= _currentFolder ?? newPath;
-        if (PathUtil.SubfoldersStayOn(_settings.IncludeSubfoldersMode, newPath, _subfolderRoot)) return;
-
-        _settings.IncludeSubfolders = false;
-        _subfolderRoot = null;
-        SyncMenuState();
-    }
-
     private void Rescan()
     {
         if (_currentFolder != null) NavigateTo(_currentFolder);
@@ -595,11 +563,7 @@ public partial class MainWindow : Window
     // Thumbnail scheduling
     // ===============================================================================================
 
-    private int ThumbDecodeSize()
-    {
-        double px = _view.CellWidth * VisualTreeHelper.GetDpi(this).DpiScaleX;
-        return px <= 150 ? 160 : px <= 230 ? 256 : px <= 330 ? 360 : 512;
-    }
+    private int ThumbDecodeSize() => DecodePolicy.ThumbnailDecodeSize(_view.CellWidth, VisualTreeHelper.GetDpi(this).DpiScaleX);
 
     private void OnViewSettingsChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -758,11 +722,11 @@ public partial class MainWindow : Window
         {
             var field = (SortField)mi.Tag;
             string label = SortChoices.First(c => c.Field == field).Label;
-            bool active = field == _sortOrder.Key;
+            bool active = field == _listing.Order.Key;
             mi.IsChecked = active;
             mi.Header = label;
             // The direction arrow; OnMenuItemLoaded shows it to the left of the label, in the check box column.
-            mi.Icon = active ? (_sortOrder.Descending ? "\u25BC" : "\u25B2") : null;
+            mi.Icon = active ? (_listing.Order.Descending ? "\u25BC" : "\u25B2") : null;
         }
         MenuShowFilenames.IsChecked = _view.ShowFilenames;
         MenuSubfolders.IsChecked = _settings.IncludeSubfolders;
@@ -782,7 +746,7 @@ public partial class MainWindow : Window
     {
         var field = (SortField)((MenuItem)sender).Tag;
         SortOrder order;
-        if (field == _sortOrder.Key) order = _sortOrder.Reversed();           // choosing it again reverses it
+        if (field == _listing.Order.Key) order = _listing.Order.Reversed();   // choosing it again reverses it
         else order = new SortOrder(field, Descending: field is SortField.DateModified or SortField.ExifDate or SortField.DateAdded); // dates default to newest first, as in the original
         try { await ApplySortAsync(order); }
         catch (Exception ex) { StatusText.Text = ex.Message; }
@@ -790,19 +754,14 @@ public partial class MainWindow : Window
 
     private async Task ApplySortAsync(SortOrder order)
     {
-        _sortOrder = order;
-        _meta.Clear();
-        _comparer = FileComparers.For(order, _meta);
+        _listing.SetOrder(order);
         SyncMenuState();
         if (_items.Count == 0) return;
 
         var selected = SelectedItems();
-        var paths = _items.Select(i => i.Path).ToList();
-        var comparer = _comparer;
         StatusText.Text = "Sorting\u2026";
-        await Task.Run(() => paths.Sort(comparer));
+        await _listing.SortAsync();
 
-        _items.ReplaceAll(paths.Where(_itemByPath.ContainsKey).Select(p => _itemByPath[p]));
         // Indices just moved, so any item might now be far from the viewport: treat everything as possibly
         // loaded and let the next update release whatever falls outside the window.
         _keepFirst = 0;
@@ -847,14 +806,14 @@ public partial class MainWindow : Window
     /// </summary>
     public void ShowSlideshow(IReadOnlyList<string> files, int start, bool includeSubfolders, string? startFolder, bool fullScreen)
     {
-        var show = new SlideshowWindow(_settings, files, start, _sortOrder, _scanner, includeSubfolders, startFolder, fullScreen);
+        var show = new SlideshowWindow(_settings, files, start, _listing.Order, _scanner, includeSubfolders, startFolder, fullScreen);
         show.FolderJumped += OnSlideshowFolderJumped;
         show.Closed += (_, _) =>
         {
             FlushFolderFollow();       // if the browser hasn't caught up with the last jump yet, do it now
             if (show.LastShownPath is { } p)
             {
-                if (_itemByPath.TryGetValue(p, out var item))
+                if (_listing.TryGet(p, out var item))
                 {
                     ThumbList.SelectedItem = item;
                     ThumbList.ScrollIntoView(item);
@@ -889,7 +848,7 @@ public partial class MainWindow : Window
 
         // The slideshow just showed this folder (with its subfolders if that option is on), so the browser
         // should too: make it the new root of the "include subfolders" tree rather than switching the option off.
-        if (_settings.IncludeSubfolders) _subfolderRoot = path;
+        _subfolders.FollowedSlideshowTo(path);
         OpenFolder(path);
     }
 
@@ -1100,7 +1059,7 @@ public partial class MainWindow : Window
             {
                 ok++;
                 _loader.Invalidate(item.Path);
-                _meta.Invalidate(item.Path);
+                _listing.Invalidate(item.Path);
                 item.ResetThumbnail();
             }
             else skipped++;
@@ -1119,8 +1078,7 @@ public partial class MainWindow : Window
     private void OnToggleSubfolders(object sender, RoutedEventArgs e)
     {
         bool on = sender is MenuItem ? MenuSubfolders.IsChecked : SubfoldersCheck.IsChecked == true;
-        _settings.IncludeSubfolders = on;
-        _subfolderRoot = on ? _currentFolder : null;        // the tree starts at the folder you're looking at
+        _subfolders.Set(on, _currentFolder);                // the tree starts at the folder you're looking at
         MenuSubfolders.IsChecked = on;
         SubfoldersCheck.IsChecked = on;
         Rescan();
@@ -1138,7 +1096,7 @@ public partial class MainWindow : Window
     private async void OnPreferences(object sender, RoutedEventArgs e)
     {
         CaptureSessionState();                   // so the dialog shows the current sort order and filename setting
-        var oldSort = _sortOrder;
+        var oldSort = _listing.Order;
         bool oldSubfolders = _settings.IncludeSubfolders;
         var oldMode = _settings.IncludeSubfoldersMode;
 
@@ -1151,17 +1109,15 @@ public partial class MainWindow : Window
         SetInfoPanelVisible(_settings.InfoPanelVisible);     // also refreshes it for the "More EXIF details" setting
 
         // Include subfolders (or how it behaves) changed: the tree it applies to starts at the folder on screen.
-        bool subfoldersChanged = _settings.IncludeSubfolders != oldSubfolders;
-        if (subfoldersChanged || _settings.IncludeSubfoldersMode != oldMode)
-            _subfolderRoot = _settings.IncludeSubfolders ? _currentFolder : null;
+        bool subfoldersChanged = _subfolders.AfterPreferences(oldSubfolders, oldMode, _currentFolder);
         bool rescan = dlg.FileTypesChanged || subfoldersChanged;
 
         // A new sort order: a rescan sorts with it anyway; otherwise re-sort what is on screen.
         Task resort = Task.CompletedTask;
         if (_settings.SortOrder != oldSort)
         {
-            if (rescan) { _sortOrder = _settings.SortOrder; _meta.Clear(); _comparer = FileComparers.For(_sortOrder, _meta); }
-            else resort = ApplySortAsync(_settings.SortOrder);   // sets _sortOrder before its first await
+            if (rescan) _listing.SetOrder(_settings.SortOrder);
+            else resort = ApplySortAsync(_settings.SortOrder);   // sets the order before its first await
         }
         SyncMenuState();
 
@@ -1225,45 +1181,20 @@ public partial class MainWindow : Window
 
     private void RemoveItem(string path)
     {
-        _meta.Invalidate(path);
         _loader.Invalidate(path);
-        if (!_itemByPath.TryGetValue(path, out var item)) return;
-        _itemByPath.Remove(path);
-        _items.Remove(item);
+        _listing.Remove(path);
     }
 
     private void UpsertItem(string path)
     {
-        _meta.Invalidate(path);
         _loader.Invalidate(path);
 
-        if (_itemByPath.TryGetValue(path, out var existing))
-        {
-            existing.ResetThumbnail();
-            if (_sortOrder.Key != SortField.Name && _sortOrder.Key != SortField.FilePath)
-            {
-                // The sort key (date/size) may have changed, so the file may belong somewhere else now.
-                bool wasSelected = ThumbList.SelectedItems.Contains(existing);
-                _items.Remove(existing);
-                _items.Insert(FindInsertIndex(path), existing);
-                if (wasSelected) ThumbList.SelectedItems.Add(existing);
-            }
-            return;
-        }
-
-        var item = new ThumbnailItem(path);
-        _itemByPath[path] = item;
-        _items.Insert(FindInsertIndex(path), item);
-    }
-
-    private int FindInsertIndex(string path)
-    {
-        int lo = 0, hi = _items.Count;
-        while (lo < hi)
-        {
-            int mid = lo + ((hi - lo) >> 1);
-            if (_comparer.Compare(_items[mid].Path, path) < 0) lo = mid + 1; else hi = mid;
-        }
-        return lo;
+        // A changed file may move (its date or size may have changed); taking it out of the list drops it from the
+        // selection, so note whether it was selected first.
+        bool wasSelected = _listing.ChangesCanReorder && _listing.TryGet(path, out var existing)
+                           && ThumbList.SelectedItems.Contains(existing);
+        var result = _listing.Upsert(path, out var item);
+        if (result != UpsertResult.Added) item.ResetThumbnail();
+        if (result == UpsertResult.Repositioned && wasSelected) ThumbList.SelectedItems.Add(item);
     }
 }

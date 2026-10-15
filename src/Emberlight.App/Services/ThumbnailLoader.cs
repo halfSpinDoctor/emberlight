@@ -151,8 +151,7 @@ public sealed class ThumbnailLoader : IDisposable
     }
 
     /// <summary>Keeps the thumbnail cache to roughly 160 MB regardless of thumbnail size.</summary>
-    private static int CapacityFor(int decodeSize)
-        => Math.Clamp((int)(160_000_000.0 / (decodeSize * (decodeSize * 0.75) * 4)), 100, 4000);
+    private static int CapacityFor(int decodeSize) => DecodePolicy.ThumbnailCacheCapacity(decodeSize);
 
     public void Dispose()
     {

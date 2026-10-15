@@ -40,7 +40,13 @@ workflow have not been confirmed on Windows - verify them on first use. WPF can'
 keep the WPF side to glue. Notable Core pieces: `RandomizableList`, `SlideshowState` (navigation), `ImageViewport`
 (zoom/pan/fit), `ImageOrientation` (EXIF 1-8 as flip+rotate), `ExifReader` (own TIFF/EXIF parser; in-place
 orientation rewrite), `FileComparers`/`SortOrder`, `DirectoryScanner`, `FolderWatcher`, `FolderNavigator`
-(next/previous sibling folder), `ThumbnailGridMath` (virtualized-grid geometry), `PathUtil`, `AppSettings`.
+(next/previous sibling folder), `ThumbnailGridMath` (virtualized-grid geometry), `PathUtil`, `AppSettings`,
+`FileListing` (the browser's sorted item list, kept in order as the watcher reports changes), `SubfolderScope`
+("Include subfolders" tree root), `DecodePolicy` (thumbnail/slide decode sizes), `SlideshowCommands` (slideshow
+commands independent of keys; the window's `MapKey` is the Windows key binding and `Execute` runs them).
+This split is also groundwork for a possible macOS front end sharing Core; a list of further logic that could move
+out of the App was drawn up on 2026-10-15 (overlay/status text, thumbnail scheduling, viewer input maths, preload
+choice, grid arrow keys, rotate/delete outcomes, preferences diff, sort menu rules, path helpers).
 
 ## Tests
 Custom dependency-free runner in `tests/Emberlight.Tests` (helpers in `TestHarness.cs`; synthetic EXIF/JPEG/PNG
@@ -50,7 +56,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~161 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~200 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.

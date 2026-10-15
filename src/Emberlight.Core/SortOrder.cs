@@ -28,4 +28,7 @@ public readonly record struct SortOrder(SortField Key, bool Descending)
     public int ToLegacy() => Descending ? -(int)Key : (int)Key;
 
     public SortOrder Reversed() => this with { Descending = !Descending };
+
+    /// <summary>Whether sorting has to open every file (for its dates or size), which can take a while.</summary>
+    public bool NeedsFileInspection => Key is not (SortField.Name or SortField.FilePath or SortField.Type);
 }

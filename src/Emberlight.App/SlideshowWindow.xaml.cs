@@ -9,6 +9,7 @@ using System.Windows.Threading;
 using Emberlight.App.Controls;
 using Emberlight.App.Services;
 using Emberlight.Core;
+using Cmd = Emberlight.Core.SlideshowCommand;
 
 namespace Emberlight.App;
 
@@ -239,8 +240,8 @@ public partial class SlideshowWindow : Window
         var img = _current;
         string? path = _state.CurrentFile;
         if (img == null || img.IsFullResolution || path == null) return;
-        double ratio = (double)Math.Max(img.Bitmap.PixelWidth, img.Bitmap.PixelHeight) / Math.Max(img.PixelWidth, img.PixelHeight);
-        if (Viewer.Viewport.Scale <= ratio * 1.001) return;     // already sharp enough for this zoom level
+        if (!DecodePolicy.NeedsFullResolution(img.Bitmap.PixelWidth, img.Bitmap.PixelHeight, img.PixelWidth, img.PixelHeight,
+                Viewer.Viewport.Scale)) return;                 // already sharp enough for this zoom level
         _ = LoadFullResolutionAsync(path, _displayVersion);
     }
 
@@ -263,11 +264,7 @@ public partial class SlideshowWindow : Window
     }
 
     private int DecodeTarget()
-    {
-        if (_settings.SlideshowActualSize) return 0;                    // 100% view needs every pixel
-        double d = Math.Max(Viewer.Viewport.ViewWidth, Viewer.Viewport.ViewHeight);
-        return d > 64 ? (int)Math.Ceiling(d) : 3840;
-    }
+        => DecodePolicy.SlideDecodeTarget(_settings.SlideshowActualSize, Viewer.Viewport.ViewWidth, Viewer.Viewport.ViewHeight);
 
     private void Preload()
     {
@@ -318,10 +315,7 @@ public partial class SlideshowWindow : Window
         _timer.Stop();
         if (!_state.IsTimerActive) return;
         // An animated GIF gets to play through at least once before the slideshow moves on (a preference).
-        var interval = TimeSpan.FromSeconds(_state.AutoAdvanceSeconds);
-        if (_settings.SlideshowGifsFinish && _current?.Animation is { } animation && animation.Duration > interval)
-            interval = animation.Duration;
-        _timer.Interval = interval;
+        _timer.Interval = _state.AutoAdvanceInterval(_settings.SlideshowGifsFinish ? _current?.Animation?.Duration : null);
         _timer.Start();
     }
 
@@ -329,10 +323,9 @@ public partial class SlideshowWindow : Window
     {
         _timer.Stop();
         if (!_state.IsTimerActive) return;
-        if (_state.CurrentIndex + 1 >= _state.Files.Count && !_state.Loop)
+        if (!_state.ContinueAutoAdvance())
         {
-            _state.SetAutoAdvance(0);   // reached the end: stop the timer
-            UpdateInfo();
+            UpdateInfo();               // reached the end: the timer is off now
             return;
         }
         Navigate(() => _state.Jump(1));
@@ -349,13 +342,15 @@ public partial class SlideshowWindow : Window
     // Navigation helpers
     // ============================================================================================
 
-    private void Navigate(Func<JumpResult> move)
+    /// <summary>Runs a move (null = it didn't move, e.g. Space paused), with a beep when blocked or the loop indicator.</summary>
+    private JumpResult? Navigate(Func<JumpResult?> move)
     {
-        _lastNavTicks = Environment.TickCount64;
+        _lastNavTicks = Environment.TickCount64;   // before moving: a cached slide is displayed (and preloads) synchronously
         var result = move();
         if (result == JumpResult.Blocked) SystemSounds.Beep.Play();
         else if (result == JumpResult.Looped) ShowLoopIndicator();
         // SlideshowState raises CurrentChanged, which triggers the display
+        return result;
     }
 
     private void ShowLoopIndicator()
@@ -396,25 +391,31 @@ public partial class SlideshowWindow : Window
 
     private bool HandleKey(KeyEventArgs e)
     {
-        Key key = e.Key == Key.System ? e.SystemKey : e.Key;
-        var mods = Keyboard.Modifiers;
+        var input = MapKey(e.Key == Key.System ? e.SystemKey : e.Key, Keyboard.Modifiers);
+        if (input.Command == Cmd.None) return false;
+        // After the last slide was deleted/finished, only some commands do anything (as in the original).
+        if (_state.IsPastEnd)
+        {
+            switch (SlideshowCommands.WhenPastEnd(input.Command))
+            {
+                case PastEndRule.Ignore: return false;
+                case PastEndRule.Swallow: return true;
+            }
+        }
+        Execute(input);
+        return true;
+    }
+
+    /// <summary>The slideshow's keys (US layout; see <see cref="HelpContent"/>). None for keys it doesn't use.</summary>
+    private SlideshowInput MapKey(Key key, ModifierKeys mods)
+    {
         bool shift = (mods & ModifierKeys.Shift) != 0;
         bool alt = (mods & ModifierKeys.Alt) != 0;
         bool ctrl = (mods & ModifierKeys.Control) != 0;
-        if (ctrl && !alt && !shift && key is (Key.Left or Key.Right))
-        {
-            _ = JumpToSiblingFolderAsync(key == Key.Right ? +1 : -1);
-            return true;
-        }
-        if (ctrl) return false;                                  // leave other Ctrl shortcuts alone
-
-        bool pastEnd = _state.IsPastEnd;
-        // After the last slide was deleted/finished, only these keys do anything (as in the original);
-        // Shift+Space goes back, plain Space is ignored.
-        if (pastEnd && key is not (Key.Left or Key.Up or Key.Home or Key.End or Key.PageUp or Key.Q or Key.Escape
-                                   or Key.OemPeriod or Key.Decimal or Key.H or Key.OemQuestion or Key.Space))
-            return false;
-        if (pastEnd && key == Key.Space && !shift) return true;
+        if (ctrl)                                                // leave other Ctrl shortcuts alone
+            return !alt && !shift && key is (Key.Left or Key.Right)
+                ? new(key == Key.Right ? Cmd.NextFolder : Cmd.PreviousFolder)
+                : default;
 
         // ---- digits: auto-advance timer / keypad panning ---------------------------------------
         int digit = key switch
@@ -426,98 +427,88 @@ public partial class SlideshowWindow : Window
         if (digit >= 0)
         {
             bool keypad = key >= Key.NumPad0 && key <= Key.NumPad9;
-            if (keypad && digit != 0 && Viewer.Viewport.CanPan) { KeypadPan(digit); return true; }
-            if (digit == 0) { SetAutoAdvance(0); return true; }
-            if (shift && key == Key.D1) { SetAutoAdvance(0.5); return true; }   // '!'
-            if (shift && key == Key.D2) { SetAutoAdvance(1.5); return true; }   // '@'
-            if (shift && key == Key.D8) { ResetCurrentView(); return true; }    // '*'
-            if (shift) return false;
-            // Starting the timer from "off" also advances once, so the first interval isn't wasted.
-            if (_state.AutoAdvanceSeconds == 0 || _state.Paused) Navigate(() => _state.Jump(1));
-            SetAutoAdvance(digit);
-            return true;
+            if (keypad && digit != 0 && Viewer.Viewport.CanPan) return new(Cmd.KeypadPan, digit);
+            if (digit == 0) return new(Cmd.SetAutoAdvance, 0);
+            if (shift && key == Key.D1) return new(Cmd.SetAutoAdvance, 0.5);   // '!'
+            if (shift && key == Key.D2) return new(Cmd.SetAutoAdvance, 1.5);   // '@'
+            if (shift && key == Key.D8) return new(Cmd.ResetView);             // '*'
+            if (shift) return default;
+            return new(Cmd.StartAutoAdvance, digit);
         }
 
-        switch (key)
+        return key switch
         {
-            case Key.Escape:
-            case Key.Q:
-            case Key.OemPeriod:          // '.'
-            case Key.Decimal:            // keypad '.'
-                Close();
-                return true;
+            Key.Escape or Key.Q or Key.OemPeriod or Key.Decimal => new(Cmd.Quit),   // '.' and keypad '.'
+            Key.S => new(Cmd.ToggleRandom),
+            Key.Space => shift ? new(Cmd.Previous) : new(Cmd.PauseOrNext, InOrder: alt),
+            Key.Right or Key.Down => new(Cmd.Next, InOrder: alt),
+            Key.Left or Key.Up => new(Cmd.Previous, InOrder: alt),
+            Key.Home => new(Cmd.First),
+            Key.End => new(Cmd.Last),
+            Key.PageUp => new(Cmd.BackPage),
+            Key.PageDown => new(Cmd.ForwardPage),
+            Key.OemPlus => shift ? new(Cmd.ZoomIn) : new(Cmd.ActualSize),       // '=' unshifted, '+' shifted (US layout)
+            Key.Add => new(Cmd.ZoomIn),
+            Key.OemMinus or Key.Subtract => new(Cmd.ZoomOut),
+            Key.Multiply => new(Cmd.ResetView),
+            Key.L => new(Cmd.RotateLeft),
+            Key.R => new(Cmd.RotateRight),
+            Key.F => new(Cmd.Flip),
+            Key.I => shift ? new(Cmd.MoreExif) : new(Cmd.CycleInfo),
+            Key.P => new(Cmd.TogglePath),
+            Key.H or Key.OemQuestion => new(Cmd.Help),
+            Key.Delete => new(Cmd.Delete),
+            _ => default,
+        };
+    }
 
-            case Key.S:
-                ToggleRandom();
-                return true;
+    private void Execute(SlideshowInput input)
+    {
+        switch (input.Command)
+        {
+            case Cmd.Quit: Close(); break;
+            case Cmd.ToggleRandom: ToggleRandom(); break;
 
-            case Key.Space:
-                if (shift) { Navigate(() => _state.Jump(-1)); return true; }
-                if (_state.IsTimerActive) { _state.Pause(); RestartTimer(); UpdateInfo(); return true; }
-                Navigate(() => _state.Jump(1, alt));
-                return true;
-            case Key.Right:
-            case Key.Down:
-                Navigate(() => _state.Jump(1, alt));
-                return true;
-            case Key.Left:
-            case Key.Up:
-                Navigate(() => _state.Jump(-1, alt));
-                return true;
-            case Key.Home:
-                Navigate(() => _state.CurrentIndex > 0 ? _state.Jump(-_state.CurrentIndex) : JumpResult.Blocked);
-                return true;
-            case Key.End:
-                Navigate(() => _state.JumpTo(_state.Files.Count - 1));
-                return true;
-            case Key.PageUp:
-                Navigate(() => _state.Jump(-10));
-                return true;
-            case Key.PageDown:
-                Navigate(() => _state.Jump(10));
-                return true;
+            case Cmd.Next: Navigate(() => _state.Jump(1, input.InOrder)); break;
+            case Cmd.Previous: Navigate(() => _state.Jump(-1, input.InOrder)); break;
+            case Cmd.PauseOrNext:
+                if (Navigate(() => _state.PauseOrNext(input.InOrder)) == null) { RestartTimer(); UpdateInfo(); }   // paused
+                break;
+            case Cmd.First: Navigate(() => _state.JumpToFirst()); break;
+            case Cmd.Last: Navigate(() => _state.JumpToLast()); break;
+            case Cmd.BackPage: Navigate(() => _state.Jump(-SlideshowCommands.PageSize)); break;
+            case Cmd.ForwardPage: Navigate(() => _state.Jump(SlideshowCommands.PageSize)); break;
+            case Cmd.NextFolder: _ = JumpToSiblingFolderAsync(+1); break;
+            case Cmd.PreviousFolder: _ = JumpToSiblingFolderAsync(-1); break;
 
-            case Key.OemPlus:                 // '=' unshifted, '+' shifted (US layout)
-                if (shift) ZoomCommand(Viewer.ZoomIn); else ActualSizeCommand();
-                return true;
-            case Key.Add:
-                ZoomCommand(Viewer.ZoomIn);
-                return true;
-            case Key.OemMinus:
-            case Key.Subtract:
-                ZoomCommand(Viewer.ZoomOut);
-                return true;
-            case Key.Multiply:
-                ResetCurrentView();
-                return true;
+            case Cmd.StartAutoAdvance:
+                Navigate(() => _state.StartAutoAdvance(input.Value));
+                RestartTimer();
+                UpdateInfo();
+                break;
+            case Cmd.SetAutoAdvance: SetAutoAdvance(input.Value); break;
+            case Cmd.KeypadPan: KeypadPan((int)input.Value); break;
 
-            case Key.L:
-                RotateCommand(-90);
-                return true;
-            case Key.R:
-                RotateCommand(+90);
-                return true;
-            case Key.F:
-                FlipCommand();
-                return true;
+            case Cmd.ZoomIn: ZoomCommand(Viewer.ZoomIn); break;
+            case Cmd.ZoomOut: ZoomCommand(Viewer.ZoomOut); break;
+            case Cmd.ActualSize: ActualSizeCommand(); break;
+            case Cmd.ResetView: ResetCurrentView(); break;
+            case Cmd.RotateLeft: RotateCommand(-90); break;
+            case Cmd.RotateRight: RotateCommand(+90); break;
+            case Cmd.Flip: FlipCommand(); break;
 
-            case Key.I:
-                if (shift) ToggleMoreExif(); else CycleInfo();
-                return true;
-            case Key.P:
+            case Cmd.CycleInfo: CycleInfo(); break;
+            case Cmd.MoreExif: ToggleMoreExif(); break;
+            case Cmd.TogglePath:
                 _settings.SlideshowShowPath = !_settings.SlideshowShowPath;
                 if (_settings.SlideshowInfoMode == 0) _settings.SlideshowInfoMode = 1;
                 UpdateInfo();
-                return true;
-            case Key.H:
-            case Key.OemQuestion:
+                break;
+            case Cmd.Help:
                 HelpPanel.Visibility = HelpPanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
-                return true;
-            case Key.Delete:
-                DeleteCurrent();
-                return true;
+                break;
+            case Cmd.Delete: DeleteCurrent(); break;
         }
-        return false;
     }
 
     private void KeypadPan(int digit)

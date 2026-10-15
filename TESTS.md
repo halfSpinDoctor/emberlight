@@ -337,6 +337,30 @@ canvas as text, one digit per pixel ("." = transparent).
 - **an empty canvas, no frames or pixel data of the wrong size are rejected**: Invalid animations throw instead of
   misbehaving later; `FrameBytes` adds up the frames' pixel data.
 
+### Slideshow commands
+What slideshow commands do, apart from which key asks for them (`SlideshowCommands`, plus the `SlideshowState`
+methods the commands use).
+
+- **after the last slide only going back, first/last, folders, help and quit still work**: Checks every command:
+  those run, Space is swallowed, and everything else is ignored.
+- **first slide: jumps back to the start, blocked when already there**: Home goes to slide 1 and beeps there, even in
+  loop mode.
+- **first slide pauses auto-advance like any step back**: Going back to the start pauses a running timer.
+- **last slide: jumps to the end, even from past the end; blocked when empty**: End works after the last slide was
+  deleted, and does nothing in an empty show.
+- **a page is 10 slides**: Page Up and Page Down move 10 slides.
+- **starting auto-advance from off moves on once; changing a running timer doesn't**: A digit key with the timer off
+  steps forward first; with it running it only changes the interval.
+- **starting auto-advance while paused also moves on and resumes**: A paused timer counts as off.
+- **starting auto-advance on the last slide still starts the timer**: The step is blocked (a beep) but the timer
+  starts; in loop mode the step wraps to the first slide.
+- **Space pauses a running timer, otherwise moves on (in original order with Alt)**: Pausing doesn't move; moving
+  resumes; Alt steps in sorted order through a shuffled show.
+- **timer tick: carries on, except at the end of a non-looping show, where it stops**: Auto-advance switches itself
+  off at the last slide unless the show loops.
+- **auto-advance interval: the set time, or longer to let an animation finish**: A GIF longer than the interval gets
+  to play through.
+
 ---
 
 ## ViewTests.cs
@@ -427,3 +451,69 @@ Detects files added, changed or deleted in the open folder (timing based).
   or a whole drive including subfolders, and stopping or disposing twice is safe.
 - **reports when the watched folder disappears**: Deleting the folder being watched raises an event. This is the case
   that `FileSystemWatcher` misses and `FolderWatcher` handles by polling.
+
+---
+
+## BrowserTests.cs
+
+### FileListing
+The browser's file list: items in sort order, looked up by path, kept in order as files change. The tests use a plain
+list of stand-in items where the app uses the grid's observable collection.
+
+- **populate keeps the given order and looks items up by path, ignoring case**: Items appear in the order given and
+  are found by path in any case; populating again or clearing replaces everything.
+- **populate goes through the bulk replace when one is given**: Whole-list changes use the supplied bulk replace (one
+  change notification on WPF).
+- **new files are inserted at their sorted place (natural name order)**: `img7` lands between `img5` and `img10`, and
+  new first and last files go at the ends.
+- **descending order inserts in descending place**: Insertion follows a reversed sort too.
+- **a changed file keeps its item; by name or path it stays put**: A reported change in name or path order keeps the
+  same item where it is.
+- **a changed file moves when the sort key can change (size)**: In size order, a file that grows moves to its new
+  place, as the same item.
+- **remove takes the item out of the list and the lookup; unknown paths are ignored**: Removal is case-insensitive and
+  removing twice or an unknown file does nothing.
+- **set order swaps the comparer; sort re-orders the same item objects**: Changing the order alone moves nothing;
+  sorting then re-orders the existing items.
+- **a file that arrives while sorting is kept, at its sorted place**: A file added between taking the snapshot and
+  applying the sorted order isn't lost (the old browser code dropped it from the grid).
+- **a file removed while sorting stays removed**: Applying a sorted order made before a removal doesn't bring the file
+  back.
+- **sorting an empty list does nothing**: No errors on an empty folder.
+- **only name, path and type sorts can skip opening the files**: `SortOrder.NeedsFileInspection` is true for the date
+  and size sorts, which show "Sorting..." rather than "Preparing...".
+- **fuzz: random adds, removes, changes and re-sorts keep list and lookup in sorted step**: 30 seeds x 150 random
+  operations, checking after each that the list is sorted, has no duplicates and matches the lookup.
+
+### SubfolderScope
+Where "Include subfolders" applies: the folder tree where it was switched on.
+
+- **off: navigation never switches it on and keeps no root**: With the option off nothing changes.
+- **switched on: stays on inside the tree, switches off outside it**: Subfolders and the root keep it on; a folder
+  outside switches it off, and it stays off.
+- **Always mode keeps it on anywhere**: With "Always" it never switches itself off.
+- **on from the last session: the first folder shown becomes the root**: A remembered "on" roots the tree at the
+  startup folder.
+- **on while a folder is already shown: that folder is the root**: The root is the folder that was on screen.
+- **switching it off forgets the root**: Turning it off clears the root.
+- **following a slideshow folder jump moves the root there instead of switching off**: After Ctrl+Left/Right the
+  browser's tree starts at the folder jumped to; nothing changes while the option is off.
+- **preferences: a change of on/off or mode re-roots at the folder on screen**: Switching on/off asks for a rescan;
+  changing only the mode re-roots without one; no change keeps the root.
+
+### DecodePolicy
+How big pictures are decoded.
+
+- **thumbnails decode at one of four sizes, by cell width in device pixels**: 160, 256, 360 or 512 px, with the
+  boundaries at 150, 230 and 330 device pixels, including high-DPI scaling.
+- **thumbnail cache holds about 160 MB, between 100 and 4000 entries**: Cache capacity for each decode size and both
+  limits.
+- **slides decode to the view's longer side, full size for 100% view, 3840 before layout**: Slide decode targets,
+  including rounding up and the not-yet-laid-out case.
+- **scale only when the picture is bigger than the limit; 0 means no limit**: When the decoder should scale.
+- **scaled size keeps the aspect ratio with the longer side at the limit, never 0**: Landscape, portrait, rounding
+  and a very thin picture.
+- **embedded EXIF previews are used when at least 3/4 of the wanted size**: The 3/4 rule, including small photos and
+  portrait previews.
+- **full resolution is needed once zoom passes what the decoded bitmap holds**: A reduced decode is replaced once the
+  zoom exceeds its detail (with a 0.1% tolerance); a full-size bitmap never is.

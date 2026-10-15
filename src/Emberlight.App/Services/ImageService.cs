@@ -137,7 +137,7 @@ public static class ImageService
             var exif = ImageOrientation.FromExif(ExifReader.GetOrientation(path));
             if (isCancelled?.Invoke() == true) return null;
 
-            bool scaled = maxDecodeDimension > 0 && Math.Max(pw, ph) > maxDecodeDimension;
+            bool scaled = DecodePolicy.ShouldScale(pw, ph, maxDecodeDimension);
             BitmapSource bmp = scaled ? DecodeScaled(path, pw, ph, maxDecodeDimension) : DecodeFull(path);
             return new LoadedImage(bmp, pw, ph, exif, !scaled, fi.Length, fi.LastWriteTimeUtc);
         }
@@ -223,11 +223,11 @@ public static class ImageService
             if (preferEmbedded && exif?.ThumbnailJpeg is { } bytes)
             {
                 var embedded = DecodeBytes(bytes);
-                if (embedded != null && Math.Max(embedded.PixelWidth, embedded.PixelHeight) >= 0.75 * Math.Min(maxDimension, Math.Max(pw, ph)))
+                if (embedded != null && DecodePolicy.EmbeddedPreviewIsBigEnough(embedded.PixelWidth, embedded.PixelHeight, maxDimension, pw, ph))
                     return new LoadedImage(embedded, pw, ph, orientation, false, fi.Length, fi.LastWriteTimeUtc);
             }
 
-            bool scaled = Math.Max(pw, ph) > maxDimension;
+            bool scaled = DecodePolicy.ShouldScale(pw, ph, maxDimension);
             BitmapSource bmp = scaled ? DecodeScaled(path, pw, ph, maxDimension) : DecodeFull(path);
             return new LoadedImage(bmp, pw, ph, orientation, !scaled, fi.Length, fi.LastWriteTimeUtc);
         }
@@ -254,9 +254,7 @@ public static class ImageService
 
     private static BitmapSource DecodeScaled(string path, int pw, int ph, int maxDimension)
     {
-        double scale = (double)maxDimension / Math.Max(pw, ph);
-        int w = Math.Max(1, (int)Math.Round(pw * scale));
-        int h = Math.Max(1, (int)Math.Round(ph * scale));
+        var (w, h) = DecodePolicy.ScaledSize(pw, ph, maxDimension);
 
         using var fs = OpenRead(path);
         var bi = new BitmapImage();

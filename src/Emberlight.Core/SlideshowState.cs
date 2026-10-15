@@ -149,12 +149,62 @@ public sealed class SlideshowState
         return JumpResult.Moved;
     }
 
+    /// <summary>Back to the first slide (a step back, so it pauses auto-advance). Blocked if already there.</summary>
+    public JumpResult JumpToFirst() => CurrentIndex > 0 ? Jump(-CurrentIndex) : JumpResult.Blocked;
+
+    public JumpResult JumpToLast() => JumpTo(Files.Count - 1);
+
+    /// <summary>
+    /// Space: pauses a running auto-advance (returns null), otherwise moves on one slide, in the original order with
+    /// <paramref name="inOrder"/>.
+    /// </summary>
+    public JumpResult? PauseOrNext(bool inOrder)
+    {
+        if (IsTimerActive) { Pause(); return null; }
+        return Jump(1, inOrder);
+    }
+
     // ---- auto-advance ---------------------------------------------------------------------
 
     public void SetAutoAdvance(double seconds)
     {
         AutoAdvanceSeconds = Math.Max(0, seconds);
         Paused = false;
+    }
+
+    /// <summary>
+    /// Starts auto-advance from a digit key. If it was off or paused this first moves on one slide, so the first
+    /// interval isn't spent looking at a slide already seen; returns that step's result, or null if there was none.
+    /// </summary>
+    public JumpResult? StartAutoAdvance(double seconds)
+    {
+        JumpResult? step = IsTimerActive ? null : Jump(1);
+        SetAutoAdvance(seconds);
+        return step;
+    }
+
+    /// <summary>
+    /// The auto-advance timer fired. False at the last slide of a show that doesn't loop: auto-advance is then switched
+    /// off. Otherwise the caller moves on with <c>Jump(1)</c>.
+    /// </summary>
+    public bool ContinueAutoAdvance()
+    {
+        if (CurrentIndex + 1 >= Files.Count && !Loop)
+        {
+            SetAutoAdvance(0);
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Time until the next automatic advance: the set interval, or <paramref name="playThrough"/> if that is longer (an
+    /// animated GIF gets to play through at least once).
+    /// </summary>
+    public TimeSpan AutoAdvanceInterval(TimeSpan? playThrough)
+    {
+        var interval = TimeSpan.FromSeconds(AutoAdvanceSeconds);
+        return playThrough is { } p && p > interval ? p : interval;
     }
 
     public void Pause() { if (AutoAdvanceSeconds > 0) Paused = true; }

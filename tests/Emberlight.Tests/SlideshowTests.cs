@@ -223,6 +223,7 @@ internal static class SlideshowTests
 
         WheelTests();
         GifTests();
+        CommandTests();
     }
 
     // A frame filled with one "colour" (stored in the blue byte), or transparent where colour is -1.
@@ -313,6 +314,115 @@ internal static class SlideshowTests
             T.Throws<ArgumentException>(() => new GifAnimation(1, 1, []));
             T.Throws<ArgumentException>(() => new GifAnimation(1, 1, [new GifFrame(0, 0, 2, 2, 0, GifDisposal.Keep, new byte[4])]));
             T.Eq(8L, new GifAnimation(2, 1, [Frame(0, 0, 1, 1, 1), Frame(1, 0, 1, 1, 2)]).FrameBytes);
+        });
+    }
+
+    static void CommandTests()
+    {
+        T.Group("Slideshow commands");
+
+        T.Run("after the last slide only going back, first/last, folders, help and quit still work", () =>
+        {
+            var run = new[]
+            {
+                SlideshowCommand.Previous, SlideshowCommand.First, SlideshowCommand.Last, SlideshowCommand.BackPage,
+                SlideshowCommand.NextFolder, SlideshowCommand.PreviousFolder, SlideshowCommand.Help, SlideshowCommand.Quit,
+            };
+            foreach (var c in run) T.Eq(PastEndRule.Run, SlideshowCommands.WhenPastEnd(c), c.ToString());
+            T.Eq(PastEndRule.Swallow, SlideshowCommands.WhenPastEnd(SlideshowCommand.PauseOrNext), "Space is eaten");
+            foreach (var c in Enum.GetValues<SlideshowCommand>().Except(run).Except([SlideshowCommand.PauseOrNext]))
+                T.Eq(PastEndRule.Ignore, SlideshowCommands.WhenPastEnd(c), c.ToString());
+        });
+
+        T.Run("first slide: jumps back to the start, blocked when already there", () =>
+        {
+            var s = Make(5, start: 3);
+            T.Eq(JumpResult.Moved, s.JumpToFirst()); T.Eq(0, s.CurrentIndex);
+            T.Eq(JumpResult.Blocked, s.JumpToFirst());
+            s.Loop = true;
+            T.Eq(JumpResult.Blocked, s.JumpToFirst(), "loop mode doesn't wrap to the end");
+        });
+
+        T.Run("first slide pauses auto-advance like any step back", () =>
+        {
+            var s = Make(5, start: 3);
+            s.SetAutoAdvance(2);
+            s.JumpToFirst();
+            T.True(s.Paused);
+        });
+
+        T.Run("last slide: jumps to the end, even from past the end; blocked when empty", () =>
+        {
+            var s = Make(5, start: 1);
+            T.Eq(JumpResult.Moved, s.JumpToLast()); T.Eq(4, s.CurrentIndex);
+            s.RemoveFile("f4.jpg");
+            T.True(s.IsPastEnd);
+            T.Eq(JumpResult.Moved, s.JumpToLast()); T.Eq(3, s.CurrentIndex);
+            T.Eq(JumpResult.Blocked, Make(0).JumpToLast());
+        });
+
+        T.Run("a page is 10 slides", () => T.Eq(10, SlideshowCommands.PageSize));
+
+        T.Run("starting auto-advance from off moves on once; changing a running timer doesn't", () =>
+        {
+            var s = Make(5);
+            T.Eq(JumpResult.Moved, s.StartAutoAdvance(3)); T.Eq(1, s.CurrentIndex);
+            T.Eq(3.0, s.AutoAdvanceSeconds); T.True(s.IsTimerActive);
+            T.Eq(null, s.StartAutoAdvance(5)); T.Eq(1, s.CurrentIndex, "already running: no extra step");
+            T.Eq(5.0, s.AutoAdvanceSeconds);
+        });
+
+        T.Run("starting auto-advance while paused also moves on and resumes", () =>
+        {
+            var s = Make(5, start: 2);
+            s.SetAutoAdvance(3);
+            s.Pause();
+            T.Eq(JumpResult.Moved, s.StartAutoAdvance(4)); T.Eq(3, s.CurrentIndex);
+            T.True(s.IsTimerActive && !s.Paused);
+        });
+
+        T.Run("starting auto-advance on the last slide still starts the timer", () =>
+        {
+            var s = Make(3, start: 2);
+            T.Eq(JumpResult.Blocked, s.StartAutoAdvance(2));
+            T.True(s.IsTimerActive);
+            s.Loop = true; s.SetAutoAdvance(0);
+            T.Eq(JumpResult.Looped, s.StartAutoAdvance(2)); T.Eq(0, s.CurrentIndex);
+        });
+
+        T.Run("Space pauses a running timer, otherwise moves on (in original order with Alt)", () =>
+        {
+            var s = Make(5);
+            s.SetAutoAdvance(3);
+            T.Eq(null, s.PauseOrNext(inOrder: false)); T.True(s.Paused); T.Eq(0, s.CurrentIndex);
+            T.Eq(JumpResult.Moved, s.PauseOrNext(inOrder: false)); T.Eq(1, s.CurrentIndex);
+            T.True(s.IsTimerActive, "moving forward resumes");
+
+            var r = Make(6, seed: 4, random: true);
+            int ordered = r.Files.OrderedIndexFromIndex(r.CurrentIndex);
+            T.Eq(JumpResult.Moved, r.PauseOrNext(inOrder: true));
+            T.Eq(ordered + 1, r.Files.OrderedIndexFromIndex(r.CurrentIndex), "next in sorted order");
+        });
+
+        T.Run("timer tick: carries on, except at the end of a non-looping show, where it stops", () =>
+        {
+            var s = Make(3);
+            s.SetAutoAdvance(2);
+            T.True(s.ContinueAutoAdvance());
+            s.JumpTo(2);
+            T.True(!s.ContinueAutoAdvance());
+            T.Eq(0.0, s.AutoAdvanceSeconds, "switched off");
+            s.Loop = true; s.SetAutoAdvance(2);
+            T.True(s.ContinueAutoAdvance(), "a looping show goes round");
+        });
+
+        T.Run("auto-advance interval: the set time, or longer to let an animation finish", () =>
+        {
+            var s = Make(3);
+            s.SetAutoAdvance(2.5);
+            T.Eq(TimeSpan.FromSeconds(2.5), s.AutoAdvanceInterval(null));
+            T.Eq(TimeSpan.FromSeconds(2.5), s.AutoAdvanceInterval(TimeSpan.FromSeconds(1)), "short GIF");
+            T.Eq(TimeSpan.FromSeconds(4), s.AutoAdvanceInterval(TimeSpan.FromSeconds(4)), "long GIF plays through");
         });
     }
 
