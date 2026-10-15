@@ -11,7 +11,7 @@ See `LICENSE-NOTICE.md` (CC BY-NC-SA 2.0) before redistributing.
 |---|---|
 | `src/Emberlight.Core` | Platform-neutral logic, **no dependencies** (net10.0). Everything with real decisions in it. |
 | `src/Emberlight.App` | The WPF application (net10.0-windows): windows, rendering, input. Thin glue over Core. |
-| `tests/Emberlight.Tests` | Dependency-free test runner for Core (286 tests; each one is described in `TESTS.md`). |
+| `tests/Emberlight.Tests` | Dependency-free test runner for Core (303 tests; each one is described in `TESTS.md`). |
 
 ## Build, test, run (Windows, .NET 10 SDK)
 
@@ -36,7 +36,7 @@ Core and the tests also build and run on Linux and macOS; the app itself needs W
 | `DYWrappingMatrix` | `App/MainWindow` thumbnail `ListBox` with `App/Controls/VirtualizingGridPanel`; geometry in `Core/ThumbnailGridMath`; sorted list in `Core/FileListing` |
 | `DYImageCache` | `Core/LruCache`, `Core/DecodePolicy`, `Core/ThumbnailScheduler`, `Core/SlidePreload` + `App/Services/ImageService`, `ThumbnailLoader` (WIC) |
 | `DYFileWatcher` / `VDKQueue` | `Core/FolderWatcher` |
-| `UKPrefsPanel`, NSUserDefaults | `App/PreferencesWindow`, `Core/AppSettings` (JSON in `%APPDATA%\Emberlight`), `Core/PreferencesInput`, `Core/ColorText` |
+| `UKPrefsPanel`, NSUserDefaults | `App/PreferencesWindow`, `Core/AppSettings` (JSON in `%APPDATA%\Emberlight`), `Core/PreferencesInput`, `Core/ColorText`, `Core/ColorPicker` |
 | `DirBrowserDelegate` | folder `TreeView` in `App/MainWindow` |
 | `DYCarbonGoodies` (file-type helpers) | `Core/ImageFileTypes` |
 
@@ -61,6 +61,8 @@ Core and the tests also build and run on Linux and macOS; the app itself needs W
   entry when you open a folder on it.
 * **Info panel** - its width can be dragged, like the folder tree's, and is remembered.
 * **Preferences > View** - the View menu's settings (sort order, file names, subfolders, info panel) in one place.
+* **Colour picker** - the slideshow's colour preferences can be typed or picked from a small popup (preset swatches,
+  a saturation/brightness square, hue and opacity bars). Logic: `Core/ColorPicker`.
 
 **Slideshow**
 
@@ -169,7 +171,7 @@ tests on every push and pull request.
 
 ## Verification status
 
-* **Core: tested.** 286 tests (listed in `TESTS.md`), including a fuzz test of the shuffle bookkeeping against a
+* **Core: tested.** 303 tests (listed in `TESTS.md`), including a fuzz test of the shuffle bookkeeping against a
   simple model, pixel-level checks of all eight EXIF orientations against the EXIF spec, parser robustness tests on
   truncated or corrupted data, real file-system tests for sorting, scanning and watching, and animated GIF frame
   composition. Key behaviours are also mutation-checked (the code is deliberately broken to confirm a test fails).

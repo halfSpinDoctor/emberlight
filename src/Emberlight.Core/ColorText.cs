@@ -26,6 +26,12 @@ public static class ColorText
     public static (byte A, byte R, byte G, byte B) Split(uint argb)
         => ((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb);
 
+    public static uint Join(byte a, byte r, byte g, byte b) => (uint)a << 24 | (uint)r << 16 | (uint)g << 8 | b;
+
+    /// <summary>The colour as the picker writes it: "#RRGGBB" when opaque, otherwise "#AARRGGBB" (capital hex digits).</summary>
+    public static string Format(uint argb)
+        => argb >> 24 == 0xFF ? $"#{argb & 0xFFFFFF:X6}" : $"#{argb:X8}";
+
     private static bool TryParseHex(string s, out uint argb)
     {
         argb = 0;

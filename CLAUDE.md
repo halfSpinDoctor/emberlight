@@ -66,7 +66,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~286 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~303 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.
@@ -83,6 +83,14 @@ are timing based and could be flaky on a loaded CI machine.
   (`GifAnimation.Duration`). Both are preferences on the Slideshow tab, on by default: "Play animated GIFs"
   (`SlideshowPlayGifs`; off = first frame only, and the frames aren't loaded at all) and, indented under it, "Let GIFs
   finish before auto-advancing" (`SlideshowGifsFinish`). The user chose the Slideshow tab over a separate GIF tab.
+- **Colour preferences** (slideshow background, behind transparent pictures) can be typed (#RRGGBB, #AARRGGBB or a
+  colour name) or picked: `Controls/ColorPickerButton` beside each box opens a popup with preset swatches, a
+  saturation/brightness square, a hue bar and an opacity bar (alpha matters: #00000000 lets the slideshow background
+  show through). Its `Text` is bound two-way to the box; the logic is `ColorPickerModel`/`Hsv` in Core (HSV, so the hue
+  survives dragging to grey or black). WPF has no colour picker; the user chose this over WinForms' ColorDialog (no
+  alpha, not Fluent) and the Extended WPF Toolkit (NuGet). The picker writes #RRGGBB, or #AARRGGBB when not opaque; a
+  name typed by hand stays as typed. Esc/Enter close the picker without closing Preferences. The old "e.g." hint
+  beside the boxes is now in their tooltips and the popup's footer.
 - **Info panel width** is adjustable with a splitter (`InfoSplitter`, hidden with the panel), like the folder tree's,
   and saved as `AppSettings.InfoPanelWidth` (default 280, kept within 160-800) when the panel is hidden and at exit.
 - **Behind transparent pictures** defaults to white (`#FFFFFF`; it was `#00000000`, i.e. the black slideshow

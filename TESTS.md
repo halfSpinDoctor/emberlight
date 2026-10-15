@@ -703,3 +703,45 @@ form, which ColorText doesn't read.
   the CSS-only RebeccaPurple), `sc#` and `rgb()`.
 - **split gives the four channels**.
 - **defaults in AppSettings are valid colours**.
+
+
+---
+
+## ColorTests.cs
+
+### Colour text formatting
+How the colour picker writes colours (`ColorText.Format`, `ColorText.Join`).
+
+- **opaque colours are written #RRGGBB, others #AARRGGBB, in capitals**: Including transparent (`#00000000`).
+- **join puts the four channels back together**: `Join` undoes `Split`.
+- **formatted text reads back as the same colour**: 500 seeded random colours survive `Format` then `TryParse`.
+
+### HSV
+Hue, saturation and value (brightness), the picker's model of a colour.
+
+- **primary, secondary and grey colours have the expected hue, saturation and value**: Red, green, blue, the three
+  secondaries, white, black, grey and orange.
+- **HSV to RGB: the corners of the hue circle and its wrap-around**: 360 degrees is red again; no saturation gives a
+  grey of any hue; no value gives black.
+- **brute-force: every 4th RGB value survives RGB -> HSV -> RGB exactly**: 262,144 colours come back unchanged, so
+  opening the picker on a typed colour never alters it.
+- **out-of-range values are clamped rather than producing garbage**: Saturation and value outside 0-1, hues below 0
+  or above 360, and NaN.
+
+### ColorPickerModel
+The state behind the Preferences colour picker.
+
+- **starts from a colour's text and gives it back**: Hex, colour names (in any case, with spaces) and transparent.
+- **text that isn't a colour leaves the picker as it was**: Short hex, empty, null and the `sc#` form.
+- **a new picker shows opaque black**.
+- **dragging in the square sets saturation and brightness, clamped to the square**: Exact colours at two points, and
+  dragging past the edges.
+- **the hue bar changes the hue and keeps saturation and brightness**: Including clamping to the bar's ends.
+- **greys and black keep the hue (and saturation) chosen before**: Dragging to the white or black edge and back finds
+  the same colour; typing a grey keeps the hue; typing black keeps the saturation.
+- **NaN from the square or a bar is never stored**: The thumb positions always get real numbers.
+- **opacity: 0 to 1 becomes alpha 0 to 255; the colour itself is kept**: Rounding, both ends, clamping and NaN.
+- **opaque and solid colours report their parts for drawing the picker**: The opacity bar's opaque end and the
+  square's full-strength hue.
+- **presets: all valid, all different, and include black, white and transparent**: And they are written the way the
+  picker writes colours.
