@@ -1,11 +1,16 @@
+using Emberlight.Core;
 using Microsoft.VisualBasic.FileIO;
 
 namespace Emberlight.App.Services;
 
 /// <summary>Moves files to the Windows Recycle Bin (never deletes permanently).</summary>
-public static class RecycleBin
+public sealed class RecycleBin : IRecycleBin
 {
-    public static bool TryDelete(string path, out string? error)
+    public static readonly RecycleBin Instance = new();
+
+    private RecycleBin() { }
+
+    public bool TryDelete(string path, out string? error)
     {
         try
         {

@@ -50,7 +50,7 @@ public partial class PreferencesWindow : Window
 
         FullScreen.IsChecked = settings.SlideshowDefaultFullScreen;
         AutoAdvance.IsChecked = settings.SlideshowAutoAdvance;
-        AutoSeconds.Text = settings.SlideshowAutoAdvanceSeconds.ToString("0.##", CultureInfo.CurrentCulture);
+        AutoSeconds.Text = PreferencesInput.FormatSeconds(settings.SlideshowAutoAdvanceSeconds, CultureInfo.CurrentCulture);
         Loop.IsChecked = settings.SlideshowLoop;
         RandomOrder.IsChecked = settings.SlideshowRandom;
         Rerandomize.IsChecked = settings.RerandomizeOnLoop;
@@ -85,16 +85,16 @@ public partial class PreferencesWindow : Window
     private void OnOk(object sender, RoutedEventArgs e)
     {
         // validate first, so an error leaves everything unchanged
-        if (!double.TryParse(AutoSeconds.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out double seconds) || seconds <= 0 || seconds > 3600)
+        if (!PreferencesInput.TryParseSeconds(AutoSeconds.Text, CultureInfo.CurrentCulture, out double seconds))
         {
-            MessageBox.Show(this, "Enter the auto-advance time as a number of seconds greater than 0.", "Preferences",
+            MessageBox.Show(this, PreferencesInput.SecondsError, "Preferences",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             AutoSeconds.Focus();
             return;
         }
-        if (!BrushHelper.IsValid(BackgroundColor.Text) || !BrushHelper.IsValid(TransparentColor.Text))
+        if (!PreferencesInput.ColorsValid(BackgroundColor.Text, TransparentColor.Text))
         {
-            MessageBox.Show(this, "Colours must look like #RRGGBB (or #AARRGGBB, or a colour name such as Black).", "Preferences",
+            MessageBox.Show(this, PreferencesInput.ColorError, "Preferences",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }

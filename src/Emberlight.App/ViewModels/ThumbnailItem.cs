@@ -7,7 +7,7 @@ using Emberlight.Core;
 namespace Emberlight.App.ViewModels;
 
 /// <summary>One cell in the thumbnail grid.</summary>
-public sealed class ThumbnailItem : INotifyPropertyChanged
+public sealed class ThumbnailItem : INotifyPropertyChanged, IThumbnailSlot
 {
     /// <summary>Whether thumbnails are shown upright according to their EXIF orientation tag. Set from preferences.</summary>
     public static bool AutoRotate { get; set; } = true;
@@ -31,10 +31,12 @@ public sealed class ThumbnailItem : INotifyPropertyChanged
     public ImageInfo? Info { get; private set; }
     public bool IsLoaded { get; private set; }
 
-    // Bookkeeping for ThumbnailLoader. Touched from worker threads, hence volatile.
-    public volatile bool IsQueued;
-    public volatile int WantedStamp = -1;
-    public int Generation;
+    // Bookkeeping for the thumbnail scheduler. Touched from worker threads, hence volatile.
+    private volatile bool _isQueued;
+    private volatile int _wantedStamp = -1;
+    public bool IsQueued { get => _isQueued; set => _isQueued = value; }
+    public int WantedStamp { get => _wantedStamp; set => _wantedStamp = value; }
+    public int Generation { get; set; }
 
     public string ToolTipText => DisplayText.ThumbnailToolTip(FileName, Info);
 

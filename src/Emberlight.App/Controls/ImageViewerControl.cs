@@ -156,7 +156,7 @@ public sealed class ImageViewerControl : Grid
         _host.RenderTransform = group;
 
         // Crisp pixels when zoomed well in; smooth resampling otherwise.
-        RenderOptions.SetBitmapScalingMode(_image, s >= 3 ? BitmapScalingMode.NearestNeighbor : BitmapScalingMode.HighQuality);
+        RenderOptions.SetBitmapScalingMode(_image, ViewerInput.UseNearestNeighbour(s) ? BitmapScalingMode.NearestNeighbor : BitmapScalingMode.HighQuality);
         Cursor = _viewport.CanPan ? Cursors.Hand : Cursors.Arrow;
         ViewChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -187,8 +187,8 @@ public sealed class ImageViewerControl : Grid
         if (!_trackingClick || e.LeftButton != MouseButtonState.Pressed) return;
         var p = e.GetPosition(this);
         double dx = p.X - _lastPoint.X, dy = p.Y - _lastPoint.Y;
-        if (Math.Abs(dx) + Math.Abs(dy) < 1) return;
-        if (Math.Abs(p.X - _downPoint.X) > 3 || Math.Abs(p.Y - _downPoint.Y) > 3) _dragMoved = true;
+        if (ViewerInput.IsNegligibleMove(dx, dy)) return;
+        if (ViewerInput.IsDrag(_downPoint.X, _downPoint.Y, p.X, p.Y)) _dragMoved = true;
         double dpi = Dpi;
         PanBy(dx * dpi, dy * dpi);
         _lastPoint = p;
@@ -214,7 +214,7 @@ public sealed class ImageViewerControl : Grid
         if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
         {
             var p = e.GetPosition(this);
-            if (_viewport.ZoomBy(e.Delta > 0 ? 0.25 : -0.2, p.X * dpi, p.Y * dpi))
+            if (_viewport.ZoomBy(ViewerInput.WheelZoomStep(e.Delta), p.X * dpi, p.Y * dpi))
             {
                 UpdateTransform();
                 UserViewChanged?.Invoke(this, EventArgs.Empty);
@@ -223,8 +223,8 @@ public sealed class ImageViewerControl : Grid
         }
         else if (_viewport.CanPan)
         {
-            double d = e.Delta / 120.0 * 128 * dpi;   // the original scrolls 128 px per wheel notch
-            if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0) PanBy(d, 0); else PanBy(0, d);
+            var (dx, dy) = ViewerInput.WheelPan(e.Delta, dpi, horizontal: (Keyboard.Modifiers & ModifierKeys.Shift) != 0);
+            PanBy(dx, dy);
             UserViewChanged?.Invoke(this, EventArgs.Empty);
             e.Handled = true;
         }

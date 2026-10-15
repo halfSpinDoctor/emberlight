@@ -46,13 +46,17 @@ orientation rewrite), `FileComparers`/`SortOrder`, `DirectoryScanner`, `FolderWa
 commands independent of keys; the window's `MapKey` is the Windows key binding and `Execute` runs them),
 `ImageInfo` (a decode's facts apart from the bitmap; the App's `LoadedImage` pairs it with a WPF bitmap),
 `DisplayText`/`SlideshowOverlay` (status bar, tooltip, info panel and slideshow overlay text and modes), `WindowFit`,
-`StartupArgs.BrowserFolder` and `StartupTarget.FromSelection`, and the sort menu's `SortOrder.Choices`/`Select`.
+`StartupArgs.BrowserFolder` and `StartupTarget.FromSelection`, the sort menu's `SortOrder.Choices`/`Select`,
+`ThumbnailScheduler` (newest-first thumbnail queue with staleness checks; the App's `ThumbnailLoader` only supplies
+the WIC decoder and the Dispatcher), `ThumbnailGridMath.ReleasedIndices`/`MoveTarget` (thumbnail release, grid
+keys), `ViewerInput` (wheel/keypad/drag maths), `SlidePreload`, `OrientationEditor` and `FileDeletion` (rotate and
+delete outcomes; the Recycle Bin is platform code behind `IRecycleBin`), `PreferencesInput`/`PreferencesFollowUp`
+(field checks, rescan/re-sort after OK) and `ColorText` (colour preferences without WPF's ColorConverter; it doesn't
+read the `sc#` scRGB form, which ColorConverter does).
 Compare paths with `PathUtil.Comparer`/`PathUtil.Comparison`/`PathUtil.SamePath`, never a hard-coded
 `OrdinalIgnoreCase` (that stays only for file extensions), so case rules live in one place.
-This split is also groundwork for a possible macOS front end sharing Core. Logic that could still move out of the
-App (listed 2026-10-15): thumbnail scheduling (`ThumbnailLoader`), viewer input maths (keypad pan, wheel zoom steps,
-click-vs-drag threshold), which slides to preload, grid arrow-key movement, rotate/delete outcomes and the
-Preferences "what changed" step.
+This split is also groundwork for a possible macOS front end sharing Core. As of 2026-10-15 the list of logic still
+to move out of the App is empty; what remains in the App is WPF rendering, input routing and platform calls.
 
 ## Tests
 Custom dependency-free runner in `tests/Emberlight.Tests` (helpers in `TestHarness.cs`; synthetic EXIF/JPEG/PNG
@@ -62,7 +66,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~239 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~286 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.

@@ -9,4 +9,5 @@ StartupArgsTests.RunAll();
 PathAndProgressTests.RunAll();
 FolderNavigatorTests.RunAll();
 BrowserTests.RunAll();
+InteractionTests.RunAll();
 return T.Summary();

@@ -562,9 +562,7 @@ public partial class MainWindow : Window
 
         var (first, end) = ThumbnailGridMath.VisibleRange(_items.Count, sv.ViewportWidth, sv.ViewportHeight,
             sv.VerticalOffset, _view.OuterCellWidth, _view.OuterCellHeight, overscanRows: 2);
-        int stamp = _loader.NextStamp();
-        for (int i = first; i < end; i++) _items[i].WantedStamp = stamp;
-        for (int i = end - 1; i >= first; i--) _loader.Request(_items[i]);   // reversed: the loader serves newest-first
+        _loader.RequestRange(_items, first, end);
 
         ReleaseDistantThumbnails(sv, first, end);
     }
@@ -577,14 +575,11 @@ public partial class MainWindow : Window
     /// </summary>
     private void ReleaseDistantThumbnails(ScrollViewer sv, int first, int end)
     {
-        int cols = ThumbnailGridMath.Columns(sv.ViewportWidth, _view.OuterCellWidth);
-        int margin = cols * ThumbnailGridMath.VisibleRowCount(sv.ViewportHeight, _view.OuterCellHeight) * 4;
+        int margin = ThumbnailGridMath.RetainMargin(sv.ViewportWidth, sv.ViewportHeight, _view.OuterCellWidth, _view.OuterCellHeight);
         var (keepFirst, keepEnd) = ThumbnailGridMath.RetainedRange(_items.Count, first, end, margin);
-
-        int oldEnd = Math.Min(_keepEnd, _items.Count);
-        for (int i = Math.Min(_keepFirst, oldEnd); i < oldEnd; i++)
+        foreach (int i in ThumbnailGridMath.ReleasedIndices(_items.Count, _keepFirst, _keepEnd, keepFirst, keepEnd))
         {
-            if ((i < keepFirst || i >= keepEnd) && _items[i].IsLoaded) _items[i].ResetThumbnail();
+            if (_items[i].IsLoaded) _items[i].ResetThumbnail();
         }
         _keepFirst = keepFirst;
         _keepEnd = keepEnd;
@@ -828,21 +823,19 @@ public partial class MainWindow : Window
     {
         var sv = FindThumbScroll();
         int cols = ThumbnailGridMath.Columns(sv?.ViewportWidth ?? ThumbList.ActualWidth, _view.OuterCellWidth);
-        int page = cols * ThumbnailGridMath.VisibleRowCount(sv?.ViewportHeight ?? ThumbList.ActualHeight, _view.OuterCellHeight);
-        int current = ThumbList.SelectedIndex < 0 ? 0 : ThumbList.SelectedIndex;
-        int target = key switch
+        int rows = ThumbnailGridMath.VisibleRowCount(sv?.ViewportHeight ?? ThumbList.ActualHeight, _view.OuterCellHeight);
+        var move = key switch
         {
-            Key.Left => current - 1,
-            Key.Right => current + 1,
-            Key.Up => current - cols,
-            Key.Down => current + cols,
-            Key.PageUp => current - page,
-            Key.PageDown => current + page,
-            Key.Home => 0,
-            Key.End => _items.Count - 1,
-            _ => current,
+            Key.Left => GridMove.Left,
+            Key.Right => GridMove.Right,
+            Key.Up => GridMove.Up,
+            Key.Down => GridMove.Down,
+            Key.PageUp => GridMove.PageUp,
+            Key.PageDown => GridMove.PageDown,
+            Key.Home => GridMove.Home,
+            _ => GridMove.End,
         };
-        SelectOnly(Math.Clamp(target, 0, _items.Count - 1));
+        SelectOnly(ThumbnailGridMath.MoveTarget(move, ThumbList.SelectedIndex, _items.Count, cols, rows));
     }
 
     private void SelectOnly(int index)
@@ -914,19 +907,14 @@ public partial class MainWindow : Window
     {
         var sel = SelectedItems();
         if (sel.Count == 0) return;
-        if (sel.Count > 10 && MessageBox.Show(this, $"Move {sel.Count} files to the Recycle Bin?", "Emberlight",
+        if (FileDeletion.NeedsConfirmation(sel.Count) && MessageBox.Show(this, FileDeletion.ConfirmationText(sel.Count), "Emberlight",
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
 
         int index = ThumbList.SelectedIndex;
-        int failed = 0; string? firstError = null;
-        foreach (var item in sel)
-        {
-            if (RecycleBin.TryDelete(item.Path, out string? err)) RemoveItem(item.Path);
-            else { failed++; firstError ??= err; }
-        }
-        if (_items.Count > 0) SelectOnly(Math.Clamp(index, 0, _items.Count - 1));
+        var result = FileDeletion.Delete(sel.Select(i => i.Path), RecycleBin.Instance, RemoveItem);
+        if (FileDeletion.SelectionAfter(index, _items.Count) is { } next) SelectOnly(next);
         UpdateStatus();
-        if (failed > 0) StatusText.Text = $"{failed} file(s) couldn't be deleted: {firstError}";
+        if (result.FailureText is { } failure) StatusText.Text = failure;
     }
 
     private void OnCopyTo(object sender, RoutedEventArgs e) => TransferSelected(move: false);
@@ -964,30 +952,20 @@ public partial class MainWindow : Window
     private void OnRotateRight(object sender, RoutedEventArgs e) => RotateSelected(+90);
     private void OnResetOrientation(object sender, RoutedEventArgs e) => RotateSelected(null);
 
-    /// <summary>
-    /// Rotates by rewriting the file's EXIF orientation value (two bytes; the pixels are untouched, so this
-    /// is lossless and instant). Only files that already carry an orientation tag can be changed this way.
-    /// </summary>
+    /// <summary>Rotates losslessly by rewriting the EXIF orientation tag (<see cref="OrientationEditor"/>), then reloads those thumbnails.</summary>
     private void RotateSelected(int? degreesCw)
     {
-        int ok = 0, skipped = 0;
-        foreach (var item in SelectedItems())
+        var selected = SelectedItems();
+        var result = OrientationEditor.Rotate(selected.Select(i => i.Path), degreesCw, _settings.PreserveModifiedDateOnEdit);
+        var updated = result.Updated.ToHashSet(PathUtil.Comparer);
+        foreach (var item in selected.Where(i => updated.Contains(i.Path)))
         {
-            var data = ImageFileTypes.MayHaveExif(item.Path) ? ExifReader.Read(item.Path) : null;
-            if (data == null || data.Orientation == 0) { skipped++; continue; }
-            int newValue = degreesCw is { } d ? data.ImageOrientation.RotatedBy(d).ToExif() : 1;
-            if (ExifReader.TrySetOrientation(item.Path, newValue, _settings.PreserveModifiedDateOnEdit))
-            {
-                ok++;
-                _loader.Invalidate(item.Path);
-                _listing.Invalidate(item.Path);
-                item.ResetThumbnail();
-            }
-            else skipped++;
+            _loader.Invalidate(item.Path);
+            _listing.Invalidate(item.Path);
+            item.ResetThumbnail();
         }
         UpdateVisibleThumbnails();
-        StatusText.Text = ok == 0 && skipped == 0 ? "Nothing selected"
-            : $"Updated {ok} file(s)" + (skipped > 0 ? $"; {skipped} skipped (no EXIF orientation tag to change)" : "");
+        StatusText.Text = result.Summary;
     }
 
     // ===============================================================================================
@@ -1031,15 +1009,13 @@ public partial class MainWindow : Window
 
         // Include subfolders (or how it behaves) changed: the tree it applies to starts at the folder on screen.
         bool subfoldersChanged = _subfolders.AfterPreferences(oldSubfolders, oldMode, _currentFolder);
-        bool rescan = dlg.FileTypesChanged || subfoldersChanged;
+        var followUp = PreferencesFollowUp.From(dlg.FileTypesChanged, subfoldersChanged, oldSort, _settings.SortOrder);
+        bool rescan = followUp.Rescan;
 
         // A new sort order: a rescan sorts with it anyway; otherwise re-sort what is on screen.
         Task resort = Task.CompletedTask;
-        if (_settings.SortOrder != oldSort)
-        {
-            if (rescan) _listing.SetOrder(_settings.SortOrder);
-            else resort = ApplySortAsync(_settings.SortOrder);   // sets the order before its first await
-        }
+        if (followUp.Sort == SortFollowUp.SetOrder) _listing.SetOrder(_settings.SortOrder);
+        else if (followUp.Sort == SortFollowUp.Resort) resort = ApplySortAsync(_settings.SortOrder);   // sets the order before its first await
         SyncMenuState();
 
         // Save now rather than waiting for exit. Capture first so the file also holds the current

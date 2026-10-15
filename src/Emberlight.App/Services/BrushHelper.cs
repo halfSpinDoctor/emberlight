@@ -1,30 +1,17 @@
 using System.Windows.Media;
+using Emberlight.Core;
 
 namespace Emberlight.App.Services;
 
 public static class BrushHelper
 {
-    /// <summary>Parses "#RRGGBB" / "#AARRGGBB" / a named colour into a frozen brush, or returns <paramref name="fallback"/>.</summary>
+    /// <summary>Turns "#RRGGBB" / "#AARRGGBB" / a named colour (read by <see cref="ColorText"/>) into a frozen brush, or returns <paramref name="fallback"/>.</summary>
     public static Brush? FromString(string? text, Brush? fallback)
     {
-        if (string.IsNullOrWhiteSpace(text)) return fallback;
-        try
-        {
-            if (ColorConverter.ConvertFromString(text.Trim()) is Color c)
-            {
-                var b = new SolidColorBrush(c);
-                b.Freeze();
-                return b;
-            }
-        }
-        catch (FormatException) { }
-        return fallback;
-    }
-
-    public static bool IsValid(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return false;
-        try { return ColorConverter.ConvertFromString(text.Trim()) is Color; }
-        catch (FormatException) { return false; }
+        if (!ColorText.TryParse(text, out uint argb)) return fallback;
+        var (a, r, g, b) = ColorText.Split(argb);
+        var brush = new SolidColorBrush(Color.FromArgb(a, r, g, b));
+        brush.Freeze();
+        return brush;
     }
 }

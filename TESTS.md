@@ -601,3 +601,105 @@ Which files a slideshow started from the browser shows (`StartupTarget.FromSelec
 - **cell widths are whole numbers within the allowed range**: Rounding and both limits.
 - **cells have a 4 px margin and a 20 px caption; size steps are 20**: The constants the grid template and the
   Larger/Smaller commands use, and the cell height with and without file names.
+
+## InteractionTests.cs
+
+### ThumbnailScheduler
+The browser's background thumbnail queue, driven with no worker threads so each step is deterministic (the
+deliveries that would go to the UI thread are collected and run by the test).
+
+- **a decoded thumbnail is shown, cached, and served from the cache next time**: Nothing is decoded on the UI thread;
+  after the decode the cell shows it, and a new cell for the same file (any case on Windows) is filled from the cache
+  without decoding again.
+- **a cached thumbnail that no longer matches its file is decoded again**: When the file check fails, the cell is
+  queued instead of shown from the cache.
+- **loaded or already queued items aren't queued twice**: Asking twice queues once, and a loaded cell isn't queued.
+- **newest requests are served first; a range is decoded top to bottom**: A visible range is decoded first cell first,
+  and later requests jump ahead of earlier ones.
+- **requests for cells scrolled away are dropped without decoding and can be requested again**: Scrolling on before
+  the decodes run skips the old cells, which are free to be asked for again when scrolled back.
+- **an item still in the newest range keeps its place when the range moves**: Overlapping ranges don't decode a cell
+  twice; the cells only in the new range come first.
+- **reset forgets the queue; results finished before a reset are thrown away**: After a reset (new folder) the queue
+  is empty, a result that was in flight is neither shown nor cached, and the cell can be asked for again.
+- **items queued before a reset are skipped when a worker reaches them**: A request from an older generation is
+  not decoded.
+- **a new decode size clears the cache and discards results at the old size**: The same size is no change; a new
+  size empties the cache, drops a result decoded at the old size, and decodes at the new one.
+- **invalidate forgets one cached thumbnail**: Only that file is decoded again.
+- **a file that can't be decoded shows as broken and isn't cached**: The cell gets the "broken" result once, and a
+  new cell tries again.
+- **worker threads decode every visible item**: With three real worker threads, all 50 requested cells are shown
+  with the right result.
+- **default worker count is half the processors, 1 to 4**.
+
+### ThumbnailGridMath (releasing thumbnails)
+- **released items are the old window minus the new one**: Overlapping, shrinking, disjoint and covering windows.
+- **a list that shrank only visits items that still exist**.
+- **retain margin is four screens of items**: Columns × visible rows × 4, at least one of each.
+- **fuzz: scrolling around never leaves a decoded thumbnail outside the retained window**: 200 seeds × 40 random
+  scrolls (with files sometimes deleted). Every released index is outside the new window, and every thumbnail still
+  decoded is inside it.
+
+### ThumbnailGridMath (keyboard movement)
+- **arrows move by one item or one row**: Including wrapping from the end of one row to the next.
+- **page keys move by the visible rows; Home and End go to the ends**.
+- **moves stop at the ends of the list**: Including Down into a short last row.
+- **nothing selected counts as the first item; an empty list has no target**: And zero columns or rows count as one.
+- **fuzz: every move lands in the list, and down/up stay in the same column when they can**: 3,000 random grids,
+  every key.
+
+### ViewerInput
+Mouse and keypad input on the slideshow picture.
+
+- **Ctrl+wheel zooms 25% in or 20% out per event, so one notch each way is a round trip**.
+- **the wheel pans 128 px per notch, scaled to device pixels; Shift pans sideways**: Including half notches from a
+  touchpad.
+- **a press becomes a drag once it moves more than 3 px on either axis**: Exactly 3 px is still a click; moves under
+  one DIP in total are ignored.
+- **pixels are drawn sharp from 3x zoom**.
+- **keypad keys pan half a view towards their side; 5 and non-digits do nothing**: All eight directions.
+- **keypad pans move the viewport the right way**: Key 7 on a zoomed-in picture shows more of its top-left.
+
+### Slide preloading
+- **the next two slides, then the previous one**: At the start, the end, and in one-slide and empty slideshows.
+- **works on a shuffled slideshow's list order**.
+- **no preloading within 200 ms of a navigation**: 199 ms is too soon, 200 ms is fine.
+
+### OrientationEditor
+The browser's lossless Rotate Left/Right and Reset Orientation commands.
+
+- **new orientation: turned from the current one, or upright for Reset**: And nothing for a file with no EXIF or no
+  orientation tag.
+- **rotating files updates the tagged ones and skips the rest**: On real files: a tagged JPEG is rewritten (keeping its
+  modified time when asked), and an untagged JPEG, a junk PNG and a missing file are skipped.
+- **summary text**: The status bar line for nothing selected, all updated, all skipped, and a mix.
+
+### FileDeletion
+The browser's Delete command, with a fake Recycle Bin.
+
+- **more than 10 files asks first**: 10 doesn't, 11 does, and the question's wording.
+- **deletes each file, reports each one that went, and keeps the first error**: Every file is tried in order; the
+  failure line names the count and the first error, and there is none when everything went.
+- **afterwards the item at the old position is selected, or the last one**: And nothing when the list is empty.
+
+### Preferences input
+- **auto-advance seconds: a number above 0 and up to an hour, in the user's number format**: Spaces, exponents and a
+  German decimal comma are accepted; 0, negatives, over an hour, text, NaN, infinity and thousands separators are not.
+- **seconds are shown with up to two decimals**: In the user's number format.
+- **both colours must be valid**.
+- **what changed decides between rescan, re-sort and nothing**: New file types or Include subfolders rescan; a new
+  sort order (direction alone counts) re-sorts, or only records the order when a rescan follows.
+
+### ColorText
+The colour preferences, read without WPF. It was cross-checked against WPF's `ColorConverter` on about 143,000
+inputs (all named colours in several spellings plus random hex-like strings); the only difference is the `sc#`
+form, which ColorText doesn't read.
+
+- **hex colours: #RRGGBB is opaque, #AARRGGBB has alpha, either case**.
+- **short hex: #RGB and #ARGB double each digit**.
+- **colour names in any case, spaces around ignored**: Including Transparent and the Aqua/Cyan synonyms.
+- **anything else is rejected**: Wrong lengths, non-hex digits, inner spaces, missing `#`, unknown names (including
+  the CSS-only RebeccaPurple), `sc#` and `rgb()`.
+- **split gives the four channels**.
+- **defaults in AppSettings are valid colours**.

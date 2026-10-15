@@ -266,15 +266,9 @@ public partial class SlideshowWindow : Window
     private void Preload()
     {
         // While the user is holding down an arrow key, don't burn CPU on slides they'll skip.
-        if (Environment.TickCount64 - _lastNavTicks < 200) return;
+        if (!SlidePreload.IsSettled(Environment.TickCount64, _lastNavTicks)) return;
         int decode = DecodeTarget();
-        int i = _state.CurrentIndex;
-        var wanted = new List<string>(3);
-        if (i + 1 < _state.Files.Count) wanted.Add(_state.Files[i + 1]);
-        if (i + 2 < _state.Files.Count) wanted.Add(_state.Files[i + 2]);
-        if (i - 1 >= 0) wanted.Add(_state.Files[i - 1]);
-
-        foreach (string p in wanted)
+        foreach (string p in SlidePreload.Candidates(_state.Files, _state.CurrentIndex))
         {
             if (_cache.ContainsKey(p)) continue;
             lock (_preloadLock) { if (!_preloading.Add(p)) continue; }
@@ -497,12 +491,12 @@ public partial class SlideshowWindow : Window
 
     private void KeypadPan(int digit)
     {
-        if (digit == 5) { SystemSounds.Beep.Play(); return; }
-        int col = (digit - 1) % 3, row = (digit - 1) / 3;            // 1-3 bottom row, 7-9 top row
-        double w = Viewer.Viewport.ViewWidth / 2, h = Viewer.Viewport.ViewHeight / 2;
-        double dx = col == 0 ? +w : col == 2 ? -w : 0;               // left keys reveal the left, so the picture moves right
-        double dy = row == 2 ? +h : row == 0 ? -h : 0;               // top keys reveal the top, so the picture moves down
-        Viewer.PanBy(dx, dy);
+        if (ViewerInput.KeypadPan(digit, Viewer.Viewport.ViewWidth, Viewer.Viewport.ViewHeight) is not { } pan)
+        {
+            SystemSounds.Beep.Play();   // 5, as in the original
+            return;
+        }
+        Viewer.PanBy(pan.Dx, pan.Dy);
         SaveViewState();
     }
 
@@ -679,7 +673,7 @@ public partial class SlideshowWindow : Window
     private void DeleteCurrent()
     {
         if (_state.CurrentFile is not { } path) return;
-        if (!RecycleBin.TryDelete(path, out string? error))
+        if (!RecycleBin.Instance.TryDelete(path, out string? error))
         {
             ShowMessage("Couldn't move to the Recycle Bin:\n" + error);
             return;

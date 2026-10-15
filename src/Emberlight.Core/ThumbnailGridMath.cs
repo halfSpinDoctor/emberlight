@@ -1,5 +1,8 @@
 namespace Emberlight.Core;
 
+/// <summary>Keyboard moves in the thumbnail grid (see <see cref="ThumbnailGridMath.MoveTarget"/>).</summary>
+public enum GridMove { Left, Right, Up, Down, PageUp, PageDown, Home, End }
+
 /// <summary>
 /// Geometry for the thumbnail grid. Cells are a uniform size, so which items are on screen can be
 /// computed directly instead of asking WPF for every container; that keeps scrolling cheap even
@@ -75,6 +78,51 @@ public static class ThumbnailGridMath
         int f = Math.Clamp(first - margin, 0, itemCount);
         int e = Math.Clamp(endExclusive + margin, f, itemCount);
         return (f, e);
+    }
+
+    /// <summary>
+    /// How many items beyond the visible range keep their thumbnails: four screens' worth each way
+    /// (columns × whole visible rows × 4), so scrolling back a little doesn't need new decodes.
+    /// </summary>
+    public static int RetainMargin(double viewportWidth, double viewportHeight, double outerCellWidth, double outerCellHeight)
+        => Columns(viewportWidth, outerCellWidth) * VisibleRowCount(viewportHeight, outerCellHeight) * 4;
+
+    /// <summary>
+    /// Items that were in the old retained window [oldFirst, oldEnd) but are outside the new one
+    /// [newFirst, newEnd): the ones that may now release their bitmaps. Only the old window is visited
+    /// (clamped to <paramref name="itemCount"/>, since the list may have shrunk), so this is cheap.
+    /// </summary>
+    public static IEnumerable<int> ReleasedIndices(int itemCount, int oldFirst, int oldEnd, int newFirst, int newEnd)
+    {
+        int end = Math.Min(oldEnd, itemCount);
+        for (int i = Math.Max(0, Math.Min(oldFirst, end)); i < end; i++)
+            if (i < newFirst || i >= newEnd) yield return i;
+    }
+
+    /// <summary>
+    /// Where the selection goes for an arrow, Page or Home/End key in a grid of <paramref name="itemCount"/>
+    /// items: by index and row arithmetic, so it works without containers for off-screen items. Nothing
+    /// selected counts as the first item; the result stays inside the list (-1 only for an empty list).
+    /// </summary>
+    public static int MoveTarget(GridMove move, int selectedIndex, int itemCount, int columns, int visibleRows)
+    {
+        if (itemCount <= 0) return -1;
+        columns = Math.Max(1, columns);
+        int page = columns * Math.Max(1, visibleRows);
+        int current = selectedIndex < 0 ? 0 : selectedIndex;
+        int target = move switch
+        {
+            GridMove.Left => current - 1,
+            GridMove.Right => current + 1,
+            GridMove.Up => current - columns,
+            GridMove.Down => current + columns,
+            GridMove.PageUp => current - page,
+            GridMove.PageDown => current + page,
+            GridMove.Home => 0,
+            GridMove.End => itemCount - 1,
+            _ => current,
+        };
+        return Math.Clamp(target, 0, itemCount - 1);
     }
 
     /// <summary>Whole rows that fit in the viewport (at least 1); used for PageUp/PageDown.</summary>
