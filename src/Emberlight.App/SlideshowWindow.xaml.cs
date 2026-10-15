@@ -1,6 +1,5 @@
 using System.IO;
 using System.Media;
-using System.Text;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -52,8 +51,8 @@ public partial class SlideshowWindow : Window
     private readonly WheelStepper _wheel = new();      // mouse wheel: one notch = one slide
     private GifPlayer? _gif;                           // the animated GIF on screen, if any
     private readonly DispatcherTimer _timer = new();
-    private readonly LruCache<string, LoadedImage> _cache = new(5, comparer: StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _preloading = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LruCache<string, LoadedImage> _cache = new(5, comparer: PathUtil.Comparer);
+    private readonly HashSet<string> _preloading = new(PathUtil.Comparer);
     private readonly object _preloadLock = new();
     private readonly bool _fullScreen;
     private readonly DirectoryScanner _scanner;
@@ -68,7 +67,7 @@ public partial class SlideshowWindow : Window
     private LoadedImage? _current;
     private int _displayVersion;
     private long _lastNavTicks;
-    private bool _moreExif;
+    private readonly SlideshowOverlay _overlay;
 
     /// <summary>Raised after Ctrl+Left/Right loaded another folder, so the browser can follow along.</summary>
     public event Action<string>? FolderJumped;
@@ -86,6 +85,7 @@ public partial class SlideshowWindow : Window
     {
         InitializeComponent();
         _settings = settings;
+        _overlay = new SlideshowOverlay(settings);
         _fullScreen = fullScreen;
         _sortOrder = sortOrder;
         _scanner = scanner;
@@ -159,7 +159,7 @@ public partial class SlideshowWindow : Window
             string path = _state.CurrentFile!;
             LastShownPath = path;
 
-            if (!_cache.TryGet(path, out var img) || !IsFresh(img, path))
+            if (!_cache.TryGet(path, out var img) || !img.Info.MatchesFile(path))
             {
                 int decode = DecodeTarget();
                 img = await Task.Run(() => version != _displayVersion ? null : ImageService.LoadDisplay(path, decode, () => version != _displayVersion, _settings.SlideshowPlayGifs));
@@ -199,10 +199,10 @@ public partial class SlideshowWindow : Window
         MessageText.Visibility = Visibility.Collapsed;
         _state.TryGetViewState(path, out var saved);
         ImageOrientation orientation = saved?.Orientation
-            ?? (_settings.AutoRotateByOrientationTag ? img.ExifOrientation : ImageOrientation.Identity);
+            ?? (_settings.AutoRotateByOrientationTag ? img.Info.ExifOrientation : ImageOrientation.Identity);
         FitWindowToImage(img, orientation);
-        Viewer.SetImage(img.Bitmap, img.PixelWidth, img.PixelHeight, orientation, saved?.Zoom);
-        if (img.Animation is { } animation)
+        Viewer.SetImage(img.Bitmap, img.Info.PixelWidth, img.Info.PixelHeight, orientation, saved?.Zoom);
+        if (img.Info.Animation is { } animation)
         {
             _gif = new GifPlayer(animation);
             Viewer.ReplaceBitmap(_gif.Bitmap);     // same size as the first frame, so the view stays as it is
@@ -218,17 +218,14 @@ public partial class SlideshowWindow : Window
     {
         if (_fullScreen || !_settings.SlideshowWindowFitToImage || WindowState != WindowState.Normal || !IsLoaded) return;
 
-        var (w, h) = orientation.ApplyToSize(img.PixelWidth, img.PixelHeight);   // device pixels
-        double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
-        double chromeW = ActualWidth - Viewer.ActualWidth, chromeH = ActualHeight - Viewer.ActualHeight;
         var work = SystemParameters.WorkArea;                                    // device-independent units
-        double newW = Math.Clamp(w / dpi + chromeW, 320, work.Width * 0.95);
-        double newH = Math.Clamp(h / dpi + chromeH, 240, work.Height * 0.95);
-
-        Left += (ActualWidth - newW) / 2;
-        Top += (ActualHeight - newH) / 2;
-        Width = newW;
-        Height = newH;
+        var fit = WindowFit.FitToImage(new WindowBounds(Left, Top, ActualWidth, ActualHeight),
+            (ActualWidth - Viewer.ActualWidth, ActualHeight - Viewer.ActualHeight), (work.Width, work.Height),
+            img.Info.PixelWidth, img.Info.PixelHeight, orientation, VisualTreeHelper.GetDpi(this).DpiScaleX);
+        Left = fit.Left;
+        Top = fit.Top;
+        Width = fit.Width;
+        Height = fit.Height;
     }
 
     /// <summary>
@@ -239,8 +236,8 @@ public partial class SlideshowWindow : Window
     {
         var img = _current;
         string? path = _state.CurrentFile;
-        if (img == null || img.IsFullResolution || path == null) return;
-        if (!DecodePolicy.NeedsFullResolution(img.Bitmap.PixelWidth, img.Bitmap.PixelHeight, img.PixelWidth, img.PixelHeight,
+        if (img == null || img.Info.IsFullResolution || path == null) return;
+        if (!DecodePolicy.NeedsFullResolution(img.Bitmap.PixelWidth, img.Bitmap.PixelHeight, img.Info.PixelWidth, img.Info.PixelHeight,
                 Viewer.Viewport.Scale)) return;                 // already sharp enough for this zoom level
         _ = LoadFullResolutionAsync(path, _displayVersion);
     }
@@ -252,7 +249,7 @@ public partial class SlideshowWindow : Window
             var full = await Task.Run(() => ImageService.LoadDisplay(path, 0, animateGifs: _settings.SlideshowPlayGifs));
             if (full == null) return;
             _cache.Set(path, full);
-            if (version != _displayVersion || !string.Equals(_state.CurrentFile, path, StringComparison.OrdinalIgnoreCase)) return;
+            if (version != _displayVersion || !string.Equals(_state.CurrentFile, path, PathUtil.Comparison)) return;
             _current = full;
             Viewer.ReplaceBitmap(full.Bitmap);
             UpdateInfo();
@@ -296,15 +293,6 @@ public partial class SlideshowWindow : Window
         }
     }
 
-    private static bool IsFresh(LoadedImage img, string path)
-    {
-        try
-        {
-            var fi = new FileInfo(path);
-            return fi.Exists && fi.Length == img.FileSize && fi.LastWriteTimeUtc == img.ModifiedUtc;
-        }
-        catch (IOException) { return false; }
-    }
 
     // ============================================================================================
     // Auto-advance
@@ -315,7 +303,7 @@ public partial class SlideshowWindow : Window
         _timer.Stop();
         if (!_state.IsTimerActive) return;
         // An animated GIF gets to play through at least once before the slideshow moves on (a preference).
-        _timer.Interval = _state.AutoAdvanceInterval(_settings.SlideshowGifsFinish ? _current?.Animation?.Duration : null);
+        _timer.Interval = _state.AutoAdvanceInterval(_settings.SlideshowGifsFinish ? _current?.Info.Animation?.Duration : null);
         _timer.Start();
     }
 
@@ -497,13 +485,9 @@ public partial class SlideshowWindow : Window
             case Cmd.RotateRight: RotateCommand(+90); break;
             case Cmd.Flip: FlipCommand(); break;
 
-            case Cmd.CycleInfo: CycleInfo(); break;
-            case Cmd.MoreExif: ToggleMoreExif(); break;
-            case Cmd.TogglePath:
-                _settings.SlideshowShowPath = !_settings.SlideshowShowPath;
-                if (_settings.SlideshowInfoMode == 0) _settings.SlideshowInfoMode = 1;
-                UpdateInfo();
-                break;
+            case Cmd.CycleInfo: _overlay.Cycle(); UpdateInfo(); break;
+            case Cmd.MoreExif: _overlay.ToggleMoreExif(); UpdateInfo(); break;
+            case Cmd.TogglePath: _overlay.TogglePath(); UpdateInfo(); break;
             case Cmd.Help:
                 HelpPanel.Visibility = HelpPanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
                 break;
@@ -582,61 +566,15 @@ public partial class SlideshowWindow : Window
     // Info overlays
     // ============================================================================================
 
-    private void CycleInfo()
-    {
-        // none -> file info -> file info + EXIF -> none
-        _settings.SlideshowInfoMode = (_settings.SlideshowInfoMode + 1) % 3;
-        UpdateInfo();
-    }
-
-    private void ToggleMoreExif()
-    {
-        if (_settings.SlideshowInfoMode != 2) { _settings.SlideshowInfoMode = 2; _moreExif = true; }
-        else _moreExif = !_moreExif;
-        UpdateInfo();
-    }
-
     private void UpdateInfo()
     {
-        int mode = _settings.SlideshowInfoMode;
-        InfoPanel.Visibility = mode > 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (mode == 0) return;
+        InfoPanel.Visibility = _overlay.ShowsInfo ? Visibility.Visible : Visibility.Collapsed;
+        if (!_overlay.ShowsInfo) return;
 
-        string? path = _state.CurrentFile;
-        if (path == null)
+        InfoText.Text = DisplayText.SlideshowInfo(_state, _settings.SlideshowShowPath, _current?.Info, Viewer.Viewport.Scale, Viewer.Orientation);
+        if (_overlay.ShowsExif && _state.CurrentFile is { } path)
         {
-            InfoText.Text = "No images";
-            ExifText.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        var sb = new StringBuilder();
-        sb.Append(_state.CurrentIndex + 1).Append('/').Append(_state.Files.Count).Append("   ")
-          .Append(_settings.SlideshowShowPath ? path : Path.GetFileName(path)).Append('\n');
-
-        if (_current != null)
-        {
-            sb.Append(_current.PixelWidth).Append(" \u00D7 ").Append(_current.PixelHeight)
-              .Append("   ").Append(FileSizeFormatter.Format((ulong)_current.FileSize))
-              .Append("   ").Append((Viewer.Viewport.Scale * 100).ToString("0.#")).Append('%');
-            var o = Viewer.Orientation;
-            if (o != ImageOrientation.Identity)
-                sb.Append("   rotated ").Append(o.RotationCw).Append('\u00B0').Append(o.Flipped ? ", flipped" : "");
-            sb.Append('\n');
-        }
-
-        var flags = new List<string>();
-        if (_state.RandomMode) flags.Add("random");
-        if (_state.Loop) flags.Add("loop");
-        if (_state.AutoAdvanceSeconds > 0)
-            flags.Add($"auto {_state.AutoAdvanceSeconds:0.#}s" + (_state.Paused ? " (paused)" : ""));
-        if (flags.Count > 0) sb.Append('[').Append(string.Join("] [", flags)).Append(']');
-        InfoText.Text = sb.ToString().TrimEnd();
-
-        if (mode == 2)
-        {
-            string text = ExifReader.Read(path)?.ToDisplayString(_moreExif) ?? "";
-            ExifText.Text = text.Length > 0 ? text : "(no EXIF data)";
+            ExifText.Text = DisplayText.ExifOverlay(path, _overlay.MoreExif);
             ExifText.Visibility = Visibility.Visible;
         }
         else

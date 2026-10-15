@@ -11,9 +11,8 @@ namespace Emberlight.App.ViewModels;
 /// </summary>
 public sealed class ViewSettings : INotifyPropertyChanged
 {
-    /// <summary>Margin around each cell; the item template uses the same value.</summary>
-    public const double CellMargin = 4;
-    public const double CaptionHeight = 20;
+    /// <summary>The margin around each cell, for the item template (<see cref="ThumbnailGridMath.CellMargin"/>).</summary>
+    public static Thickness CellMarginThickness { get; } = new(ThumbnailGridMath.CellMargin);
 
     private double _cellWidth = 120;
     private bool _showFilenames = true;
@@ -23,7 +22,7 @@ public sealed class ViewSettings : INotifyPropertyChanged
         get => _cellWidth;
         set
         {
-            double v = Math.Clamp(Math.Round(value), AppSettings.MinThumbCellWidth, AppSettings.MaxThumbCellWidth);
+            double v = ThumbnailGridMath.ClampCellWidth(value);
             if (v == _cellWidth) return;
             _cellWidth = v;
             Raise(nameof(CellWidth));
@@ -47,11 +46,11 @@ public sealed class ViewSettings : INotifyPropertyChanged
         }
     }
 
-    public double CellHeight => ThumbnailGridMath.CellHeight(_cellWidth, _showFilenames, CaptionHeight);
+    public double CellHeight => ThumbnailGridMath.CellHeight(_cellWidth, _showFilenames);
     public Visibility FilenameVisibility => _showFilenames ? Visibility.Visible : Visibility.Collapsed;
 
-    public double OuterCellWidth => _cellWidth + 2 * CellMargin;
-    public double OuterCellHeight => CellHeight + 2 * CellMargin;
+    public double OuterCellWidth => ThumbnailGridMath.OuterSize(_cellWidth);
+    public double OuterCellHeight => ThumbnailGridMath.OuterSize(CellHeight);
 
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));

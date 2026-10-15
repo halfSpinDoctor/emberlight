@@ -7,14 +7,10 @@ using Emberlight.Core;
 
 namespace Emberlight.App.Services;
 
-/// <summary>A decoded picture plus the facts the UI needs about the file it came from.</summary>
-/// <param name="Bitmap">Frozen bitmap. May be a reduced-size decode; see <paramref name="IsFullResolution"/>.</param>
-/// <param name="PixelWidth">Pixel width of the *file's* image (not necessarily of <paramref name="Bitmap"/>).</param>
-/// <param name="Animation">For an animated GIF, its frames (<paramref name="Bitmap"/> is then the first one, composed).</param>
-public sealed record LoadedImage(
-    BitmapSource Bitmap, int PixelWidth, int PixelHeight,
-    ImageOrientation ExifOrientation, bool IsFullResolution, long FileSize, DateTime ModifiedUtc,
-    GifAnimation? Animation = null);
+/// <summary>A decoded picture: the WPF bitmap plus what Core knows about it (<see cref="ImageInfo"/>).</summary>
+/// <param name="Bitmap">Frozen bitmap. May be a reduced-size decode; see <see cref="ImageInfo.IsFullResolution"/>.
+/// For an animated GIF it is the first frame, composed.</param>
+public sealed record LoadedImage(BitmapSource Bitmap, ImageInfo Info);
 
 /// <summary>
 /// Image decoding via Windows' built-in imaging stack (WIC, through WPF's BitmapDecoder).
@@ -130,8 +126,7 @@ public static class ImageService
                 var first = new GifCompositor(anim);
                 var bitmap = BitmapSource.Create(anim.Width, anim.Height, 96, 96, PixelFormats.Bgra32, null, first.Canvas, first.Stride);
                 bitmap.Freeze();
-                return new LoadedImage(bitmap, anim.Width, anim.Height, ImageOrientation.Identity, true,
-                    fi.Length, fi.LastWriteTimeUtc, anim);
+                return new LoadedImage(bitmap, ImageInfo.ForFile(fi, anim.Width, anim.Height, ImageOrientation.Identity, true, anim));
             }
 
             var exif = ImageOrientation.FromExif(ExifReader.GetOrientation(path));
@@ -139,7 +134,7 @@ public static class ImageService
 
             bool scaled = DecodePolicy.ShouldScale(pw, ph, maxDecodeDimension);
             BitmapSource bmp = scaled ? DecodeScaled(path, pw, ph, maxDecodeDimension) : DecodeFull(path);
-            return new LoadedImage(bmp, pw, ph, exif, !scaled, fi.Length, fi.LastWriteTimeUtc);
+            return new LoadedImage(bmp, ImageInfo.ForFile(fi, pw, ph, exif, !scaled));
         }
         catch (Exception)
         {
@@ -224,12 +219,12 @@ public static class ImageService
             {
                 var embedded = DecodeBytes(bytes);
                 if (embedded != null && DecodePolicy.EmbeddedPreviewIsBigEnough(embedded.PixelWidth, embedded.PixelHeight, maxDimension, pw, ph))
-                    return new LoadedImage(embedded, pw, ph, orientation, false, fi.Length, fi.LastWriteTimeUtc);
+                    return new LoadedImage(embedded, ImageInfo.ForFile(fi, pw, ph, orientation, false));
             }
 
             bool scaled = DecodePolicy.ShouldScale(pw, ph, maxDimension);
             BitmapSource bmp = scaled ? DecodeScaled(path, pw, ph, maxDimension) : DecodeFull(path);
-            return new LoadedImage(bmp, pw, ph, orientation, !scaled, fi.Length, fi.LastWriteTimeUtc);
+            return new LoadedImage(bmp, ImageInfo.ForFile(fi, pw, ph, orientation, !scaled));
         }
         catch (Exception)
         {

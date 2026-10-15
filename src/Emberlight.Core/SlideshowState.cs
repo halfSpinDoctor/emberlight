@@ -29,7 +29,7 @@ public sealed class FileViewState
 /// </summary>
 public sealed class SlideshowState
 {
-    private readonly Dictionary<string, FileViewState> _view = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, FileViewState> _view = new(PathUtil.Comparer);
 
     public SlideshowState() : this(new RandomizableList<string>()) { }
     public SlideshowState(RandomizableList<string> files) => Files = files;

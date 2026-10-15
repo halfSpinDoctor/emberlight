@@ -81,7 +81,7 @@ public static class FolderNavigator
         string current = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(currentFolder));
         int index = -1;
         for (int i = 0; i < siblings.Count; i++)
-            if (string.Equals(siblings[i], current, StringComparison.OrdinalIgnoreCase)) { index = i; break; }
+            if (string.Equals(siblings[i], current, PathUtil.Comparison)) { index = i; break; }
         if (index < 0) return null;
 
         for (int i = index + step; i >= 0 && i < siblings.Count; i += step)

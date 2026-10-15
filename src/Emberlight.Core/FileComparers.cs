@@ -16,7 +16,7 @@ public sealed class FileMetadataCache
         public DateTime? SortDate;
     }
 
-    private readonly Dictionary<string, Entry> _entries = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Entry> _entries = new(PathUtil.Comparer);
     private readonly object _lock = new();
 
     public void Invalidate(string path) { lock (_lock) _entries.Remove(path); }

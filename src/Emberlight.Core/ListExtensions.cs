@@ -41,7 +41,7 @@ public static class ListExtensions
         => paths.Transform(p => Rebase(p, oldBase, newBase));
 
     private static string Rebase(string path, string oldBase, string newBase)
-        => path.StartsWith(oldBase, StringComparison.OrdinalIgnoreCase)
+        => path.StartsWith(oldBase, PathUtil.Comparison)
             ? string.Concat(newBase, path.AsSpan(oldBase.Length))
             : path;
 }

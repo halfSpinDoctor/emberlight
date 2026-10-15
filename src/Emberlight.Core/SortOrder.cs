@@ -29,6 +29,28 @@ public readonly record struct SortOrder(SortField Key, bool Descending)
 
     public SortOrder Reversed() => this with { Descending = !Descending };
 
+    /// <summary>The sort fields as the Sort By menu and Preferences list them.</summary>
+    public static IReadOnlyList<(SortField Field, string Label)> Choices { get; } =
+    [
+        (SortField.Name, "Name"),
+        (SortField.DateModified, "Date Modified"),
+        (SortField.ExifDate, "EXIF Date"),
+        (SortField.DateAdded, "Date Created"),
+        (SortField.Type, "File Type"),
+        (SortField.Size, "File Size"),
+        (SortField.FilePath, "Full Path"),
+    ];
+
+    public static string LabelFor(SortField field) => Choices.First(c => c.Field == field).Label;
+
+    /// <summary>
+    /// The order after the user picks <paramref name="field"/> in the Sort By menu: picking the current field again
+    /// reverses it; a new field starts newest first for dates (as in the original) and ascending otherwise.
+    /// </summary>
+    public SortOrder Select(SortField field)
+        => field == Key ? Reversed()
+            : new SortOrder(field, Descending: field is SortField.DateModified or SortField.ExifDate or SortField.DateAdded);
+
     /// <summary>Whether sorting has to open every file (for its dates or size), which can take a while.</summary>
     public bool NeedsFileInspection => Key is not (SortField.Name or SortField.FilePath or SortField.Type);
 }

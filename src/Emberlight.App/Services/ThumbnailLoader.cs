@@ -1,4 +1,3 @@
-using System.IO;
 using System.Windows.Threading;
 using Emberlight.App.ViewModels;
 using Emberlight.Core;
@@ -27,7 +26,7 @@ public sealed class ThumbnailLoader : IDisposable
     public ThumbnailLoader(Dispatcher dispatcher, int workerCount = 0)
     {
         _dispatcher = dispatcher;
-        _cache = new LruCache<string, LoadedImage>(CapacityFor(_decodeSize), comparer: StringComparer.OrdinalIgnoreCase);
+        _cache = new LruCache<string, LoadedImage>(CapacityFor(_decodeSize), comparer: PathUtil.Comparer);
         int n = workerCount > 0 ? workerCount : Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
         for (int i = 0; i < n; i++) Task.Run(() => WorkerLoop(_cts.Token));
     }
@@ -57,7 +56,7 @@ public sealed class ThumbnailLoader : IDisposable
         {
             if (decodeSize == _decodeSize) return false;
             _decodeSize = decodeSize;
-            _cache = new LruCache<string, LoadedImage>(CapacityFor(decodeSize), comparer: StringComparer.OrdinalIgnoreCase);
+            _cache = new LruCache<string, LoadedImage>(CapacityFor(decodeSize), comparer: PathUtil.Comparer);
             _generation++;
             _pending.Clear();
             return true;
@@ -76,7 +75,7 @@ public sealed class ThumbnailLoader : IDisposable
 
         LruCache<string, LoadedImage> cache;
         lock (_lock) cache = _cache;
-        if (cache.TryGet(item.Path, out var cached) && IsFresh(cached, item.Path))
+        if (cache.TryGet(item.Path, out var cached) && cached.Info.MatchesFile(item.Path))
         {
             item.SetLoaded(cached);
             return;
@@ -138,16 +137,6 @@ public sealed class ThumbnailLoader : IDisposable
         if (stale) { item.IsQueued = false; return; }
         if (image != null) cache.Set(item.Path, image);
         item.SetLoaded(image);
-    }
-
-    private static bool IsFresh(LoadedImage image, string path)
-    {
-        try
-        {
-            var fi = new FileInfo(path);
-            return fi.Exists && fi.Length == image.FileSize && fi.LastWriteTimeUtc == image.ModifiedUtc;
-        }
-        catch (IOException) { return false; }
     }
 
     /// <summary>Keeps the thumbnail cache to roughly 160 MB regardless of thumbnail size.</summary>

@@ -23,7 +23,7 @@ public sealed class FileListing<TItem> where TItem : class
     private readonly Func<string, TItem> _create;
     private readonly Func<TItem, string> _pathOf;
     private readonly Action<IEnumerable<TItem>> _replaceAll;
-    private readonly Dictionary<string, TItem> _byPath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, TItem> _byPath = new(PathUtil.Comparer);
     private readonly FileMetadataCache _meta = new();
 
     /// <param name="items">The list to keep in order; only Insert, Remove and the indexer are used on it.</param>
@@ -145,7 +145,7 @@ public sealed class FileListing<TItem> where TItem : class
     /// </summary>
     public void ApplyOrder(IReadOnlyList<string> sortedPaths)
     {
-        var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var placed = new HashSet<string>(PathUtil.Comparer);
         var ordered = new List<TItem>(_byPath.Count);
         foreach (var path in sortedPaths)
         {

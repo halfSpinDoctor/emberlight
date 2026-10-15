@@ -34,7 +34,7 @@ public static class FileTransfer
     {
         Directory.CreateDirectory(destDirectory);
         if (string.Equals(Path.GetFullPath(Path.GetDirectoryName(source) ?? ""),
-                          Path.GetFullPath(destDirectory), StringComparison.OrdinalIgnoreCase))
+                          Path.GetFullPath(destDirectory), PathUtil.Comparison))
             return source;
         string dest = GetUniquePath(destDirectory, Path.GetFileName(source));
         File.Move(source, dest, overwrite: false);

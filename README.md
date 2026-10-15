@@ -11,7 +11,7 @@ See `LICENSE-NOTICE.md` (CC BY-NC-SA 2.0) before redistributing.
 |---|---|
 | `src/Emberlight.Core` | Platform-neutral logic, **no dependencies** (net10.0). Everything with real decisions in it. |
 | `src/Emberlight.App` | The WPF application (net10.0-windows): windows, rendering, input. Thin glue over Core. |
-| `tests/Emberlight.Tests` | Dependency-free test runner for Core (200 tests; each one is described in `TESTS.md`). |
+| `tests/Emberlight.Tests` | Dependency-free test runner for Core (239 tests; each one is described in `TESTS.md`). |
 
 ## Build, test, run (Windows, .NET 10 SDK)
 
@@ -169,7 +169,7 @@ tests on every push and pull request.
 
 ## Verification status
 
-* **Core: tested.** 200 tests (listed in `TESTS.md`), including a fuzz test of the shuffle bookkeeping against a
+* **Core: tested.** 239 tests (listed in `TESTS.md`), including a fuzz test of the shuffle bookkeeping against a
   simple model, pixel-level checks of all eight EXIF orientations against the EXIF spec, parser robustness tests on
   truncated or corrupted data, real file-system tests for sorting, scanning and watching, and animated GIF frame
   composition. Key behaviours are also mutation-checked (the code is deliberately broken to confirm a test fails).

@@ -11,7 +11,7 @@ public sealed class FolderWatcher : IDisposable
     private readonly Func<string, bool> _shouldShow;
     private readonly TimeSpan _delay;
     private readonly object _lock = new();
-    private readonly HashSet<string> _pending = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _pending = new(PathUtil.Comparer);
     private FileSystemWatcher? _fsw;
     private Timer? _timer, _rootPoll;
     private bool _rescan, _rootChanged, _disposed, _rootGoneReported;
@@ -41,7 +41,7 @@ public sealed class FolderWatcher : IDisposable
             string full = System.IO.Path.GetFullPath(path);
             // Refuse to watch a whole drive recursively: far too noisy.
             if (includeSubfolders && System.IO.Path.GetPathRoot(full) is { } root &&
-                string.Equals(root.TrimEnd('\\', '/'), full.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+                PathUtil.SamePath(root, full))
                 return false;
             if (!Directory.Exists(full)) return false;
 
@@ -114,7 +114,7 @@ public sealed class FolderWatcher : IDisposable
     private void Note(string fullPath)
     {
         string? root = Path;
-        if (root != null && string.Equals(fullPath.TrimEnd('\\', '/'), root.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+        if (root != null && PathUtil.SamePath(fullPath, root))
         {
             lock (_lock) _rootChanged = true;
             Kick();
@@ -165,7 +165,7 @@ public sealed class FolderWatcher : IDisposable
         {
             string? rootPath = Path;
             if (rootPath != null && !IncludeSubfolders &&
-                !string.Equals(System.IO.Path.GetDirectoryName(p), rootPath, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(System.IO.Path.GetDirectoryName(p), rootPath, PathUtil.Comparison))
                 continue;
             if (File.Exists(p))
             {

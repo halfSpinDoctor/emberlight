@@ -224,6 +224,143 @@ internal static class SlideshowTests
         WheelTests();
         GifTests();
         CommandTests();
+        OverlayTests();
+        WindowFitTests();
+    }
+
+    static void OverlayTests()
+    {
+        T.Group("Slideshow overlay");
+
+        T.Run("I cycles none -> file info -> file info + EXIF -> none", () =>
+        {
+            var s = new AppSettings { SlideshowInfoMode = 0 };
+            var o = new SlideshowOverlay(s);
+            T.True(!o.ShowsInfo && !o.ShowsExif);
+            o.Cycle(); T.Eq(1, s.SlideshowInfoMode); T.True(o.ShowsInfo && !o.ShowsExif);
+            o.Cycle(); T.Eq(2, s.SlideshowInfoMode); T.True(o.ShowsInfo && o.ShowsExif);
+            o.Cycle(); T.Eq(0, s.SlideshowInfoMode); T.True(!o.ShowsInfo);
+        });
+
+        T.Run("Shift+I jumps to the EXIF view with more details, then toggles the details", () =>
+        {
+            var s = new AppSettings { SlideshowInfoMode = 0 };
+            var o = new SlideshowOverlay(s);
+            T.True(!o.MoreExif);
+            o.ToggleMoreExif(); T.Eq(2, s.SlideshowInfoMode); T.True(o.MoreExif);
+            o.ToggleMoreExif(); T.Eq(2, s.SlideshowInfoMode); T.True(!o.MoreExif);
+            o.ToggleMoreExif(); T.True(o.MoreExif);
+            s.SlideshowInfoMode = 1;
+            o.ToggleMoreExif(); T.Eq(2, s.SlideshowInfoMode); T.True(o.MoreExif, "from file info: always more");
+        });
+
+        T.Run("P toggles the full path and shows the info if it was hidden", () =>
+        {
+            var s = new AppSettings { SlideshowInfoMode = 0, SlideshowShowPath = false };
+            var o = new SlideshowOverlay(s);
+            o.TogglePath(); T.True(s.SlideshowShowPath); T.Eq(1, s.SlideshowInfoMode);
+            s.SlideshowInfoMode = 2;
+            o.TogglePath(); T.True(!s.SlideshowShowPath); T.Eq(2, s.SlideshowInfoMode, "an open view stays as it is");
+        });
+
+        string dir = Path.Combine(Path.GetTempPath(), "phx-show");
+        var info = new ImageInfo(6000, 4000, ImageOrientation.Identity, false, 3_000_000, DateTime.UtcNow);
+        string size = FileSizeFormatter.Format(3_000_000);
+        SlideshowState Show(int n, int start = 0)
+        {
+            var s = new SlideshowState(new RandomizableList<string>(new Random(1)));
+            s.Load(Enumerable.Range(0, n).Select(i => Path.Combine(dir, $"f{i}.jpg")), start);
+            return s;
+        }
+
+        T.Run("info line: position and name, then size, file size and zoom", () =>
+        {
+            var s = Show(12, 2);
+            string pct = (0.25 * 100).ToString("0.#");
+            T.Eq($"3/12   f2.jpg\n6000 × 4000   {size}   {pct}%",
+                DisplayText.SlideshowInfo(s, false, info, 0.25, ImageOrientation.Identity));
+            T.Eq($"3/12   {Path.Combine(dir, "f2.jpg")}\n6000 × 4000   {size}   {pct}%",
+                DisplayText.SlideshowInfo(s, true, info, 0.25, ImageOrientation.Identity), "full path");
+            T.Eq("3/12   f2.jpg", DisplayText.SlideshowInfo(s, false, null, 1, ImageOrientation.Identity), "couldn't be opened");
+        });
+
+        T.Run("info line: rotation and flip the user applied", () =>
+        {
+            var s = Show(3);
+            T.True(DisplayText.SlideshowInfo(s, false, info, 1, ImageOrientation.Identity.RotatedBy(90)).EndsWith("100%   rotated 90°"));
+            T.True(DisplayText.SlideshowInfo(s, false, info, 1, ImageOrientation.Identity.FlippedDisplay()).Contains(", flipped"));
+        });
+
+        T.Run("info line: random, loop and auto-advance flags", () =>
+        {
+            var s = Show(5);
+            s.Loop = true;
+            s.SetRandom(true);
+            s.SetAutoAdvance(2.5);
+            string text = DisplayText.SlideshowInfo(s, false, info, 1, ImageOrientation.Identity);
+            T.True(text.EndsWith($"\n[random] [loop] [auto {2.5:0.#}s]"), text);
+            s.Pause();
+            T.True(DisplayText.SlideshowInfo(s, false, info, 1, ImageOrientation.Identity).EndsWith(" (paused)]"));
+        });
+
+        T.Run("info line: an empty or finished show says so", () =>
+        {
+            T.Eq("No images", DisplayText.SlideshowInfo(Show(0), false, null, 1, ImageOrientation.Identity));
+            var s = Show(1);
+            s.RemoveFile(s.CurrentFile!);
+            T.Eq("No images", DisplayText.SlideshowInfo(s, false, null, 1, ImageOrientation.Identity));
+        });
+
+        T.Run("EXIF overlay: the tags, or a note when there are none", () =>
+        {
+            using var tmp = new TempDir();
+            string jpg = tmp.Write("photo.jpg", ExifTestBuilder.WrapInJpeg(new ExifTestBuilder(false).BuildSample()));
+            T.Eq(ExifReader.Read(jpg)!.ToDisplayString(true), DisplayText.ExifOverlay(jpg, true));
+            T.Eq(ExifReader.Read(jpg)!.ToDisplayString(false), DisplayText.ExifOverlay(jpg, false));
+            T.Eq("(no EXIF data)", DisplayText.ExifOverlay(tmp.Write("plain.png", new byte[10]), false));
+        });
+    }
+
+    static void WindowFitTests()
+    {
+        T.Group("WindowFit");
+        var work = (W: 1920.0, H: 1040.0);
+        var chrome = (W: 16.0, H: 39.0);
+        var window = new WindowBounds(100, 100, 800, 600);
+
+        T.Run("the window grows or shrinks to the picture plus its frame, keeping its centre", () =>
+        {
+            var b = WindowFit.FitToImage(window, chrome, work, 1000, 700, ImageOrientation.Identity, 1);
+            T.Eq(new WindowBounds(-8, 30.5, 1016, 739), b);
+            T.Eq(window.Left + window.Width / 2, b.Left + b.Width / 2, "same centre x");
+            T.Eq(window.Top + window.Height / 2, b.Top + b.Height / 2, "same centre y");
+        });
+
+        T.Run("picture pixels are converted to screen units at high DPI", () =>
+        {
+            var b = WindowFit.FitToImage(window, chrome, work, 1000, 700, ImageOrientation.Identity, 2);
+            T.Eq((516.0, 389.0), (b.Width, b.Height));
+        });
+
+        T.Run("a rotated picture swaps width and height", () =>
+        {
+            var b = WindowFit.FitToImage(window, chrome, work, 700, 500, ImageOrientation.FromExif(6), 1);
+            T.Eq((516.0, 739.0), (b.Width, b.Height));
+        });
+
+        T.Run("at least 320 x 240, at most 95% of the work area", () =>
+        {
+            var tiny = WindowFit.FitToImage(window, chrome, work, 10, 10, ImageOrientation.Identity, 1);
+            T.Eq((320.0, 240.0), (tiny.Width, tiny.Height));
+            var huge = WindowFit.FitToImage(window, chrome, work, 8000, 6000, ImageOrientation.Identity, 1);
+            T.Eq((1920 * 0.95, 1040 * 0.95), (huge.Width, huge.Height));
+        });
+
+        T.Run("a work area smaller than the minimum doesn't throw", () =>
+        {
+            var b = WindowFit.FitToImage(window, chrome, (200, 100), 10, 10, ImageOrientation.Identity, 1);
+            T.Eq((320.0, 240.0), (b.Width, b.Height));
+        });
     }
 
     // A frame filled with one "colour" (stored in the blue byte), or transparent where colour is -1.

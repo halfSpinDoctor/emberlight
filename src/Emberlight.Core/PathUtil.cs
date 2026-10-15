@@ -3,6 +3,50 @@ namespace Emberlight.Core;
 public static class PathUtil
 {
     /// <summary>
+    /// How file paths are compared everywhere in the app: ignoring case, as Windows (and macOS by default) does.
+    /// One place to change if a front end ever needs case-sensitive paths.
+    /// </summary>
+    public static StringComparer Comparer => StringComparer.OrdinalIgnoreCase;
+
+    /// <inheritdoc cref="Comparer"/>
+    public const StringComparison Comparison = StringComparison.OrdinalIgnoreCase;
+
+    /// <summary>Whether two paths name the same folder, ignoring case and trailing separators (no other normalising).</summary>
+    public static bool SamePath(string? a, string? b)
+        => a == null || b == null ? a == b : string.Equals(TrimSeparators(a), TrimSeparators(b), Comparison);
+
+    public static string TrimSeparators(string path) => path.TrimEnd('\\', '/');
+
+    /// <summary>
+    /// The root of <paramref name="path"/> (a drive, share or "/") followed by each folder down to the path itself,
+    /// e.g. C:\, C:\Pics, C:\Pics\2020. Empty for an invalid path.
+    /// </summary>
+    public static IReadOnlyList<string> AncestorChain(string path)
+    {
+        string full;
+        try { full = Path.GetFullPath(path); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return []; }
+
+        string root = Path.GetPathRoot(full) ?? "";
+        var chain = new List<string> { root };
+        string acc = root;
+        foreach (string segment in full[root.Length..].Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            acc = Path.Combine(acc, segment);
+            chain.Add(acc);
+        }
+        return chain;
+    }
+
+    /// <summary>The path itself if it is an existing folder, else its nearest existing parent; null if there is none.</summary>
+    public static string? NearestExistingFolder(string? path)
+    {
+        string? p = path;
+        while (!string.IsNullOrEmpty(p) && !Directory.Exists(p)) p = Path.GetDirectoryName(p);
+        return string.IsNullOrEmpty(p) ? null : p;
+    }
+
+    /// <summary>
     /// True if <paramref name="path"/> is <paramref name="root"/> itself or lies somewhere beneath it.
     /// Comparison is case-insensitive (Windows semantics) and ignores trailing separators, so
     /// "C:\Pics2" is *not* inside "C:\Pics". Invalid paths are never "inside" anything.
@@ -12,9 +56,9 @@ public static class PathUtil
         try
         {
             string a = Trim(Path.GetFullPath(path)), b = Trim(Path.GetFullPath(root));
-            if (a.Equals(b, StringComparison.OrdinalIgnoreCase)) return true;
+            if (a.Equals(b, Comparison)) return true;
             return a.Length > b.Length
-                && a.StartsWith(b, StringComparison.OrdinalIgnoreCase)
+                && a.StartsWith(b, Comparison)
                 && (a[b.Length] == Path.DirectorySeparatorChar || a[b.Length] == Path.AltDirectorySeparatorChar);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)

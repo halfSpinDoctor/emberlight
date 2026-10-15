@@ -7,8 +7,24 @@ namespace Emberlight.Core;
 /// </summary>
 public static class ThumbnailGridMath
 {
+    /// <summary>Space around each cell (on every side).</summary>
+    public const double CellMargin = 4;
+
+    /// <summary>Height of the file name line under a thumbnail.</summary>
+    public const double CaptionHeight = 20;
+
+    /// <summary>How much the Larger/Smaller commands change the cell width.</summary>
+    public const double SizeStep = 20;
+
+    /// <summary>A cell width as the grid uses it: whole units, within the allowed range.</summary>
+    public static double ClampCellWidth(double width)
+        => Math.Clamp(Math.Round(width), AppSettings.MinThumbCellWidth, AppSettings.MaxThumbCellWidth);
+
+    /// <summary>A cell's width or height including its margin on both sides.</summary>
+    public static double OuterSize(double cellSize) => cellSize + 2 * CellMargin;
+
     /// <summary>Cell height for a given width: thumbnails are 4:3 boxes, plus a caption line when filenames are shown.</summary>
-    public static double CellHeight(double cellWidth, bool showFilenames, double captionHeight = 20)
+    public static double CellHeight(double cellWidth, bool showFilenames, double captionHeight = CaptionHeight)
         => Math.Round(cellWidth * 3 / 4) + (showFilenames ? captionHeight : 0);
 
     public static int Columns(double viewportWidth, double outerCellWidth)

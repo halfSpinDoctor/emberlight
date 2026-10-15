@@ -28,7 +28,7 @@ public sealed class ThumbnailItem : INotifyPropertyChanged
     public Transform OrientationTransform => _orientationTransform;
 
     /// <summary>What was decoded for this item (null until loaded, or if the file couldn't be read).</summary>
-    public LoadedImage? Info { get; private set; }
+    public ImageInfo? Info { get; private set; }
     public bool IsLoaded { get; private set; }
 
     // Bookkeeping for ThumbnailLoader. Touched from worker threads, hence volatile.
@@ -36,18 +36,11 @@ public sealed class ThumbnailItem : INotifyPropertyChanged
     public volatile int WantedStamp = -1;
     public int Generation;
 
-    public string ToolTipText
-    {
-        get
-        {
-            if (Info == null) return FileName;
-            return $"{FileName}\n{Info.PixelWidth} \u00D7 {Info.PixelHeight}   {FileSizeFormatter.Format((ulong)Info.FileSize)}";
-        }
-    }
+    public string ToolTipText => DisplayText.ThumbnailToolTip(FileName, Info);
 
     public void SetLoaded(LoadedImage? image)
     {
-        Info = image;
+        Info = image?.Info;
         IsLoaded = true;
         IsQueued = false;
         if (image == null)
@@ -58,7 +51,7 @@ public sealed class ThumbnailItem : INotifyPropertyChanged
         else
         {
             _thumbnail = image.Bitmap;
-            _orientationTransform = AutoRotate ? OrientationTransforms.For(image.ExifOrientation) : Transform.Identity;
+            _orientationTransform = AutoRotate ? OrientationTransforms.For(image.Info.ExifOrientation) : Transform.Identity;
         }
         RaiseAll();
     }

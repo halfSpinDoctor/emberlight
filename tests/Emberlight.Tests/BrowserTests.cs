@@ -29,6 +29,294 @@ internal static class BrowserTests
         FileListingTests();
         SubfolderScopeTests();
         DecodePolicyTests();
+        ImageInfoTests();
+        BrowserTextTests();
+        SortChoiceTests();
+        StartupFolderTests();
+        PathHelperTests();
+        SlideshowSelectionTests();
+        GridSizeTests();
+    }
+
+    static void ImageInfoTests()
+    {
+        T.Group("ImageInfo");
+
+        T.Run("a cached picture matches its file until the size or modified time changes", () =>
+        {
+            using var tmp = new TempDir();
+            string p = tmp.Write("a.jpg", new byte[100]);
+            var fi = new FileInfo(p);
+            var info = new ImageInfo(40, 30, ImageOrientation.Identity, true, fi.Length, fi.LastWriteTimeUtc);
+            T.True(info.MatchesFile(p));
+            T.True(info.MatchesFile(p.ToUpperInvariant()) || !OperatingSystem.IsWindows(), "any case on Windows");
+
+            File.SetLastWriteTimeUtc(p, fi.LastWriteTimeUtc.AddSeconds(5));
+            T.True(!info.MatchesFile(p), "touched");
+            File.SetLastWriteTimeUtc(p, fi.LastWriteTimeUtc);
+            T.True(info.MatchesFile(p), "time put back");
+
+            File.WriteAllBytes(p, new byte[101]);
+            File.SetLastWriteTimeUtc(p, fi.LastWriteTimeUtc);
+            T.True(!info.MatchesFile(p), "different size");
+        });
+
+        T.Run("a missing file or a bad path never matches", () =>
+        {
+            var info = new ImageInfo(1, 1, ImageOrientation.Identity, true, 0, DateTime.MinValue);
+            T.True(!info.MatchesFile(Path.Combine(Path.GetTempPath(), "phx-missing-" + Guid.NewGuid().ToString("N") + ".jpg")));
+            T.True(!info.MatchesFile("bad\0path"));
+            T.True(!info.MatchesFile(""));
+        });
+
+        T.Run("ForFile reads the size and modified time from the file", () =>
+        {
+            using var tmp = new TempDir();
+            string p = tmp.Write("a.jpg", new byte[77]);
+            var info = ImageInfo.ForFile(new FileInfo(p), 8, 6, ImageOrientation.FromExif(6), false);
+            T.Eq(77L, info.FileSize);
+            T.Eq(new FileInfo(p).LastWriteTimeUtc, info.ModifiedUtc);
+            T.Eq((8, 6), (info.PixelWidth, info.PixelHeight));
+            T.Eq(ImageOrientation.FromExif(6), info.ExifOrientation);
+            T.True(!info.IsFullResolution && info.Animation == null);
+            T.True(info.MatchesFile(p));
+        });
+    }
+
+    static void BrowserTextTests()
+    {
+        T.Group("DisplayText (browser)");
+        var info = new ImageInfo(4000, 3000, ImageOrientation.Identity, false, 2_500_000, DateTime.UtcNow);
+        string size = FileSizeFormatter.Format(2_500_000);
+
+        T.Run("status bar: image count, then the selection", () =>
+        {
+            T.Eq("0 images", DisplayText.BrowserStatus(0, 0, null, null));
+            T.Eq("1 image", DisplayText.BrowserStatus(1, 0, null, null));
+            T.Eq("1500 images", DisplayText.BrowserStatus(1500, 0, null, null), "no thousands separator, as before");
+            T.Eq("12 images  \u00B7  3 selected", DisplayText.BrowserStatus(12, 3, null, null));
+            T.Eq("12 images  \u00B7  a.jpg", DisplayText.BrowserStatus(12, 1, "a.jpg", null), "not loaded yet");
+            T.Eq($"12 images  \u00B7  a.jpg  \u00B7  4000 \u00D7 3000  \u00B7  {size}", DisplayText.BrowserStatus(12, 1, "a.jpg", info));
+        });
+
+        T.Run("thumbnail tooltip: the name, plus size once loaded", () =>
+        {
+            T.Eq("a.jpg", DisplayText.ThumbnailToolTip("a.jpg", null));
+            T.Eq($"a.jpg\n4000 \u00D7 3000   {size}", DisplayText.ThumbnailToolTip("a.jpg", info));
+        });
+
+        T.Run("info panel heading: no selection, several, or the file name", () =>
+        {
+            T.Eq("No selection", DisplayText.InfoPanelHeader(0, null));
+            T.Eq("3 files selected", DisplayText.InfoPanelHeader(3, null));
+            T.Eq("a.jpg", DisplayText.InfoPanelHeader(1, "a.jpg"));
+        });
+
+        T.Run("info panel: folder, size, date and dimensions; EXIF after a blank line", () =>
+        {
+            using var tmp = new TempDir();
+            string plain = tmp.Write("plain.png", new byte[512]);
+            var fi = new FileInfo(plain);
+            string head = $"Folder: {fi.DirectoryName}\nSize: 512 bytes\nModified: {fi.LastWriteTime:g}\n";
+            T.Eq(head.Replace("\n", Environment.NewLine), DisplayText.InfoPanelBody(plain, null, false), "no size, no EXIF");
+            T.Eq((head + "Dimensions: 8 \u00D7 6\n").Replace("\n", Environment.NewLine), DisplayText.InfoPanelBody(plain, (8, 6), false));
+
+            string jpg = tmp.Write("photo.jpg", ExifTestBuilder.WrapInJpeg(new ExifTestBuilder(false).BuildSample()));
+            foreach (bool more in new[] { false, true })
+            {
+                string exif = ExifReader.Read(jpg)!.ToDisplayString(more);
+                T.True(exif.Length > 0);
+                string body = DisplayText.InfoPanelBody(jpg, null, more);
+                string nl = Environment.NewLine;
+                T.True(body.EndsWith($"Modified: {new FileInfo(jpg).LastWriteTime:g}{nl}{nl}{exif}{nl}"),
+                    $"EXIF block after a blank line (more = {more})");
+            }
+        });
+
+        T.Run("info panel: a file that has gone gets no file lines, rather than half of them", () =>
+        {
+            string gone = Path.Combine(Path.GetTempPath(), "phx-gone-" + Guid.NewGuid().ToString("N") + ".jpg");
+            T.Eq("", DisplayText.InfoPanelBody(gone, null, false));
+            T.Eq("Dimensions: 2 \u00D7 1" + Environment.NewLine, DisplayText.InfoPanelBody(gone, (2, 1), false));
+        });
+    }
+
+    static void SortChoiceTests()
+    {
+        T.Group("Sort choices");
+
+        T.Run("every sort field is offered once, in menu order, with its label", () =>
+        {
+            T.SeqEq(new[] { SortField.Name, SortField.DateModified, SortField.ExifDate, SortField.DateAdded, SortField.Type,
+                            SortField.Size, SortField.FilePath }, SortOrder.Choices.Select(c => c.Field));
+            T.SeqEq(new[] { "Name", "Date Modified", "EXIF Date", "Date Created", "File Type", "File Size", "Full Path" },
+                SortOrder.Choices.Select(c => c.Label));
+            T.Eq(Enum.GetValues<SortField>().Length, SortOrder.Choices.Count);
+            T.Eq("EXIF Date", SortOrder.LabelFor(SortField.ExifDate));
+        });
+
+        T.Run("choosing a new field: dates newest first, the rest ascending", () =>
+        {
+            var current = new SortOrder(SortField.Name, false);
+            T.Eq(new SortOrder(SortField.DateModified, true), current.Select(SortField.DateModified));
+            T.Eq(new SortOrder(SortField.ExifDate, true), current.Select(SortField.ExifDate));
+            T.Eq(new SortOrder(SortField.DateAdded, true), current.Select(SortField.DateAdded));
+            T.Eq(new SortOrder(SortField.Size, false), current.Select(SortField.Size));
+            T.Eq(new SortOrder(SortField.Type, false), current.Select(SortField.Type));
+            T.Eq(new SortOrder(SortField.Name, false), new SortOrder(SortField.Size, true).Select(SortField.Name));
+        });
+
+        T.Run("choosing the current field again reverses it", () =>
+        {
+            T.Eq(new SortOrder(SortField.Name, true), new SortOrder(SortField.Name, false).Select(SortField.Name));
+            T.Eq(new SortOrder(SortField.DateModified, false), new SortOrder(SortField.DateModified, true).Select(SortField.DateModified));
+        });
+    }
+
+    static void StartupFolderTests()
+    {
+        T.Group("Startup folder");
+
+        T.Run("a folder given on the command line is opened as it is", () =>
+        {
+            using var tmp = new TempDir();
+            T.Eq(tmp.Path, StartupArgs.BrowserFolder(tmp.Path, new AppSettings(), out var select));
+            T.Eq(null, select);
+        });
+
+        T.Run("a file given on the command line opens its folder and selects it", () =>
+        {
+            using var tmp = new TempDir();
+            string f = tmp.Write("a.jpg", new byte[1]);
+            T.Eq(tmp.Path, StartupArgs.BrowserFolder(f, new AppSettings(), out var select));
+            T.Eq(Path.GetFullPath(f), select);
+        });
+
+        T.Run("otherwise the last folder or the chosen pictures folder, as set", () =>
+        {
+            using var last = new TempDir();
+            using var pics = new TempDir();
+            var s = new AppSettings { LastFolderPath = last.Path, PicturesFolderPath = pics.Path, StartupOption = StartupFolder.LastFolder };
+            T.Eq(last.Path, StartupArgs.BrowserFolder(null, s, out var select));
+            T.Eq(null, select);
+            s.StartupOption = StartupFolder.PicturesFolder;
+            T.Eq(pics.Path, StartupArgs.BrowserFolder(null, s, out _));
+            T.Eq(pics.Path, StartupArgs.BrowserFolder(Path.Combine(last.Path, "missing"), s, out select), "a missing path is ignored");
+            T.Eq(null, select);
+        });
+
+        T.Run("a remembered folder that has gone falls back to an existing folder", () =>
+        {
+            var s = new AppSettings { LastFolderPath = Path.Combine(Path.GetTempPath(), "phx-gone-" + Guid.NewGuid().ToString("N")) };
+            string folder = StartupArgs.BrowserFolder(null, s, out _);
+            T.True(Directory.Exists(folder), folder);
+            string pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+            if (Directory.Exists(pictures)) T.Eq(pictures, folder, "the user's Pictures folder");
+            T.True(Directory.Exists(StartupArgs.BrowserFolder("", new AppSettings { LastFolderPath = "" }, out _)));
+        });
+    }
+
+    static void PathHelperTests()
+    {
+        T.Group("PathUtil helpers");
+        string root = Path.GetPathRoot(Path.GetTempPath())!;
+
+        T.Run("ancestor chain: the root, then each folder down to the path", () =>
+        {
+            string a = Path.Combine(root, "phx-a"), b = Path.Combine(a, "b"), c = Path.Combine(b, "c");
+            T.SeqEq(new[] { root, a, b, c }, PathUtil.AncestorChain(c));
+            T.SeqEq(new[] { root, a, b, c }, PathUtil.AncestorChain(c + Path.DirectorySeparatorChar), "trailing separator");
+            T.SeqEq(new[] { root }, PathUtil.AncestorChain(root));
+        });
+
+        T.Run("ancestor chain of a network share starts at the share", () =>
+        {
+            if (!OperatingSystem.IsWindows()) return;           // UNC paths are a Windows thing
+            T.SeqEq(new[] { @"\\nas\photos", @"\\nas\photos\2020", @"\\nas\photos\2020\June" },
+                PathUtil.AncestorChain(@"\\nas\photos\2020\June"));
+        });
+
+        T.Run("ancestor chain of bad input is empty", () =>
+        {
+            T.Eq(0, PathUtil.AncestorChain("").Count);
+            T.Eq(0, PathUtil.AncestorChain("bad\0path").Count);
+        });
+
+        T.Run("same path ignores trailing separators and case, but not real differences", () =>
+        {
+            string a = Path.Combine(root, "phx-x", "Pics");
+            T.True(PathUtil.SamePath(a, a + Path.DirectorySeparatorChar));
+            T.True(PathUtil.SamePath(a, a.ToUpperInvariant()));
+            T.True(PathUtil.SamePath(root, root));
+            T.True(!PathUtil.SamePath(a, a + "2"));
+            T.True(!PathUtil.SamePath(a, null));
+            T.True(PathUtil.SamePath(null, null));
+            T.True(PathUtil.Comparer.Equals(a, a.ToLowerInvariant()));
+            T.True(string.Equals(a, a.ToLowerInvariant(), PathUtil.Comparison));
+        });
+
+        T.Run("nearest existing folder walks up past folders that have gone", () =>
+        {
+            using var tmp = new TempDir();
+            string gone = Path.Combine(tmp.Path, "x", "y", "z");
+            T.Eq(tmp.Path, PathUtil.NearestExistingFolder(gone));
+            T.Eq(tmp.Path, PathUtil.NearestExistingFolder(tmp.Path), "an existing folder is its own answer");
+            T.Eq(null, PathUtil.NearestExistingFolder(""));
+            T.Eq(null, PathUtil.NearestExistingFolder(null));
+        });
+    }
+
+    static void SlideshowSelectionTests()
+    {
+        T.Group("Slideshow from the browser");
+        string[] grid = ["a.jpg", "b.jpg", "c.jpg", "d.jpg"];
+
+        T.Run("nothing selected: the whole folder from the start", () =>
+        {
+            var t = StartupTarget.FromSelection(grid, [], "dir");
+            T.SeqEq(grid, t.Files); T.Eq(0, t.StartIndex); T.Eq("dir", t.Folder);
+        });
+
+        T.Run("one file selected: the whole folder, starting there", () =>
+        {
+            var t = StartupTarget.FromSelection(grid, ["C.JPG"], null);
+            T.SeqEq(grid, t.Files); T.Eq(2, t.StartIndex);
+        });
+
+        T.Run("several selected: just those, in grid order, from the first", () =>
+        {
+            var t = StartupTarget.FromSelection(grid, ["d.jpg", "b.jpg"], "dir");
+            T.SeqEq(new[] { "b.jpg", "d.jpg" }, t.Files); T.Eq(0, t.StartIndex);
+        });
+
+        T.Run("a selected file that is no longer in the grid starts at the beginning", () =>
+        {
+            var t = StartupTarget.FromSelection(grid, ["zzz.jpg"], null);
+            T.SeqEq(grid, t.Files); T.Eq(0, t.StartIndex);
+        });
+    }
+
+    static void GridSizeTests()
+    {
+        T.Group("Thumbnail sizes");
+
+        T.Run("cell widths are whole numbers within the allowed range", () =>
+        {
+            T.Eq(120.0, ThumbnailGridMath.ClampCellWidth(120));
+            T.Eq(121.0, ThumbnailGridMath.ClampCellWidth(120.6));
+            T.Eq(AppSettings.MinThumbCellWidth, ThumbnailGridMath.ClampCellWidth(10));
+            T.Eq(AppSettings.MaxThumbCellWidth, ThumbnailGridMath.ClampCellWidth(5000));
+        });
+
+        T.Run("cells have a 4 px margin and a 20 px caption; size steps are 20", () =>
+        {
+            T.Eq(4.0, ThumbnailGridMath.CellMargin);
+            T.Eq(20.0, ThumbnailGridMath.CaptionHeight);
+            T.Eq(20.0, ThumbnailGridMath.SizeStep);
+            T.Eq(128.0, ThumbnailGridMath.OuterSize(120));
+            T.Eq(110.0, ThumbnailGridMath.CellHeight(120, true), "90 for the picture, 20 for the caption");
+            T.Eq(90.0, ThumbnailGridMath.CellHeight(120, false));
+        });
     }
 
     static void FileListingTests()

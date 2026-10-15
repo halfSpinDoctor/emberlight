@@ -34,7 +34,7 @@ public partial class PreferencesWindow : Window
         OpenDoSlideshow.IsChecked = settings.OpenFilesDoSlideshow;
         OpenSubfolders.IsChecked = settings.StartupSlideshowSubfolders;
 
-        foreach (var (field, label) in MainWindow.SortChoices)
+        foreach (var (field, label) in SortOrder.Choices)
         {
             var choice = new ComboBoxItem { Content = label, Tag = field };
             SortFieldBox.Items.Add(choice);

@@ -361,6 +361,32 @@ methods the commands use).
 - **auto-advance interval: the set time, or longer to let an animation finish**: A GIF longer than the interval gets
   to play through.
 
+### Slideshow overlay
+The info and EXIF overlays: which are showing (`SlideshowOverlay`) and their text (`DisplayText`).
+
+- **I cycles none -> file info -> file info + EXIF -> none**: The I key steps through the three overlay modes.
+- **Shift+I jumps to the EXIF view with more details, then toggles the details**: From any other view it opens the
+  EXIF view with the extra tags; in that view it toggles them.
+- **P toggles the full path and shows the info if it was hidden**: An already open view stays as it is.
+- **info line: position and name, then size, file size and zoom**: The full text, with the file name or the full path,
+  and without the second line when the slide couldn't be opened.
+- **info line: rotation and flip the user applied**: "rotated 90°" and ", flipped" appear when the slide is turned.
+- **info line: random, loop and auto-advance flags**: The flags in brackets, including "(paused)".
+- **info line: an empty or finished show says so**: "No images" for an empty show and after the last slide was
+  deleted.
+- **EXIF overlay: the tags, or a note when there are none**: The overlay shows the same tags as the info panel, or
+  "(no EXIF data)".
+
+### WindowFit
+Resizing a windowed slideshow to the picture (a preference).
+
+- **the window grows or shrinks to the picture plus its frame, keeping its centre**: The exact new bounds, with the
+  centre unchanged.
+- **picture pixels are converted to screen units at high DPI**: At 200% a 1000 px picture needs 500 units.
+- **a rotated picture swaps width and height**: EXIF orientation 6 turns a landscape picture portrait.
+- **at least 320 x 240, at most 95% of the work area**: Both limits.
+- **a work area smaller than the minimum doesn't throw**: The minimum wins instead of an exception.
+
 ---
 
 ## ViewTests.cs
@@ -517,3 +543,61 @@ How big pictures are decoded.
   portrait previews.
 - **full resolution is needed once zoom passes what the decoded bitmap holds**: A reduced decode is replaced once the
   zoom exceeds its detail (with a 0.1% tolerance); a full-size bitmap never is.
+
+### ImageInfo
+What is known about a decoded picture apart from its pixels, shared by both platforms' image caches.
+
+- **a cached picture matches its file until the size or modified time changes**: Touching or resizing the file makes
+  the cached decode stale; putting the time back makes it current again.
+- **a missing file or a bad path never matches**: No exceptions for a missing file, an invalid path or an empty one.
+- **ForFile reads the size and modified time from the file**: All fields are filled in from the file and the
+  arguments.
+
+### DisplayText (browser)
+The browser's status bar, thumbnail tooltips and info panel.
+
+- **status bar: image count, then the selection**: "1 image", "N images", "N selected", and the selected file's
+  name with its size once loaded.
+- **thumbnail tooltip: the name, plus size once loaded**: Name alone until the thumbnail loads.
+- **info panel heading: no selection, several, or the file name**: The three headings.
+- **info panel: folder, size, date and dimensions; EXIF after a blank line**: The exact lines for a plain file, with
+  and without the picture size, and the EXIF tags (normal and "more") after a blank line.
+- **info panel: a file that has gone gets no file lines, rather than half of them**: A deleted file shows only what
+  is still known (the old code left a dangling "Folder:" and "Size:").
+
+### Sort choices
+- **every sort field is offered once, in menu order, with its label**: The Sort By menu and Preferences list.
+- **choosing a new field: dates newest first, the rest ascending**: As in the original.
+- **choosing the current field again reverses it**: Both directions.
+
+### Startup folder
+Which folder the browser opens at startup.
+
+- **a folder given on the command line is opened as it is**: Nothing is selected.
+- **a file given on the command line opens its folder and selects it**: The file's full path is selected.
+- **otherwise the last folder or the chosen pictures folder, as set**: Follows the startup preference; a path that
+  doesn't exist is ignored.
+- **a remembered folder that has gone falls back to an existing folder**: The user's Pictures folder, or their home
+  folder.
+
+### PathUtil helpers
+- **ancestor chain: the root, then each folder down to the path**: Used to open the folder tree level by level;
+  trailing separators make no difference.
+- **ancestor chain of a network share starts at the share**: `\nas\photos` is the root (Windows only).
+- **ancestor chain of bad input is empty**: No exceptions.
+- **same path ignores trailing separators and case, but not real differences**: Also checks `PathUtil.Comparer` and
+  `PathUtil.Comparison`, which every path comparison in the app now uses.
+- **nearest existing folder walks up past folders that have gone**: Used when the open folder is deleted.
+
+### Slideshow from the browser
+Which files a slideshow started from the browser shows (`StartupTarget.FromSelection`).
+
+- **nothing selected: the whole folder from the start**.
+- **one file selected: the whole folder, starting there**: Matched in any case.
+- **several selected: just those, in grid order, from the first**.
+- **a selected file that is no longer in the grid starts at the beginning**.
+
+### Thumbnail sizes
+- **cell widths are whole numbers within the allowed range**: Rounding and both limits.
+- **cells have a 4 px margin and a 20 px caption; size steps are 20**: The constants the grid template and the
+  Larger/Smaller commands use, and the cell height with and without file names.

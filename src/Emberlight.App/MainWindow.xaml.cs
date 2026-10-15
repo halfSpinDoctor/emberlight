@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.IO;
-using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -21,17 +20,6 @@ namespace Emberlight.App;
 /// </summary>
 public partial class MainWindow : Window
 {
-    internal static readonly (SortField Field, string Label)[] SortChoices =
-    {
-        (SortField.Name, "Name"),
-        (SortField.DateModified, "Date Modified"),
-        (SortField.ExifDate, "EXIF Date"),
-        (SortField.DateAdded, "Date Created"),
-        (SortField.Type, "File Type"),
-        (SortField.Size, "File Size"),
-        (SortField.FilePath, "Full Path"),
-    };
-
     private readonly AppSettings _settings;
     private readonly string? _startPath;
     private readonly ImageFileTypes _types = new();
@@ -56,7 +44,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<TreeViewItem, Task> _childLoads = new();   // folders whose subfolders are being read
     private int _treeSelectVersion;      // bumped by each tree walk and user selection; an older walk then stops
     private Task _treeRootsListed = Task.CompletedTask;    // done once the shortcuts are in and drive checks started
-    private readonly Dictionary<string, Task> _driveChecks = new(StringComparer.OrdinalIgnoreCase);   // drive root -> its readiness check
+    private readonly Dictionary<string, Task> _driveChecks = new(PathUtil.Comparer);   // drive root -> its readiness check
 
     public MainWindow(AppSettings settings, string? startPath)
     {
@@ -107,31 +95,12 @@ public partial class MainWindow : Window
         _treeRootsListed = BuildTreeRootsAsync();     // SelectPathInTree waits for this (and for its own drive)
         _loader.Configure(ThumbDecodeSize());
 
-        string start = ResolveStartPath();
+        string start = StartupArgs.BrowserFolder(_startPath, _settings, out string? fileToSelect);
+        if (fileToSelect != null) _pendingSelectPath = fileToSelect;
         SelectPathInTree(start);
         NavigateTo(start);
 
         if (_settings.InfoPanelVisible) SetInfoPanelVisible(true);
-    }
-
-    private string ResolveStartPath()
-    {
-        string? candidate = null;
-        if (_startPath != null)
-        {
-            if (Directory.Exists(_startPath)) candidate = _startPath;
-            else if (File.Exists(_startPath))
-            {
-                candidate = Path.GetDirectoryName(Path.GetFullPath(_startPath));
-                _pendingSelectPath = Path.GetFullPath(_startPath);
-            }
-        }
-        candidate ??= _settings.StartupOption == StartupFolder.LastFolder ? _settings.LastFolderPath : _settings.PicturesFolderPath;
-        if (string.IsNullOrWhiteSpace(candidate) || !Directory.Exists(candidate))
-            candidate = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-        if (string.IsNullOrWhiteSpace(candidate) || !Directory.Exists(candidate))
-            candidate = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return candidate;
     }
 
     private void OnClosing(object? sender, CancelEventArgs e)
@@ -200,7 +169,7 @@ public partial class MainWindow : Window
         int firstDriveIndex = FolderTree.Items.Count;
         var ready = new bool[drives.Length];
         for (int i = 0; i < drives.Length; i++)
-            _driveChecks[drives[i].RootDirectory.FullName.TrimEnd('\\', '/')] = AddDriveWhenReadyAsync(drives[i], i);
+            _driveChecks[PathUtil.TrimSeparators(drives[i].RootDirectory.FullName)] = AddDriveWhenReadyAsync(drives[i], i);
 
         async Task AddDriveWhenReadyAsync(DriveInfo drive, int i)
         {
@@ -273,18 +242,16 @@ public partial class MainWindow : Window
     private async Task SelectPathInTreeAsync(string path)
     {
         int version = ++_treeSelectVersion;
-        string full;
-        try { full = Path.GetFullPath(path); }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return; }
+        var chain = PathUtil.AncestorChain(path);     // the drive or share, then each folder down to the path
+        if (chain.Count == 0) return;
 
-        string root = Path.GetPathRoot(full) ?? "";
+        string root = chain[0];
         TreeViewItem? FindRoot() => FolderTree.Items.OfType<TreeViewItem>().FirstOrDefault(i =>
-            i.Tag is string t && string.Equals(t.TrimEnd('\\', '/'), root.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)
-            && !i.Header.ToString()!.StartsWith('\u2605'));
+            i.Tag is string t && PathUtil.SamePath(t, root) && !i.Header.ToString()!.StartsWith('\u2605'));
         await _treeRootsListed;
         if (version != _treeSelectVersion) return;
         var current = FindRoot();
-        if (current == null && _driveChecks.TryGetValue(root.TrimEnd('\\', '/'), out var driveCheck))
+        if (current == null && _driveChecks.TryGetValue(PathUtil.TrimSeparators(root), out var driveCheck))
         {
             await driveCheck;                         // the drive may still be answering whether it is ready
             if (version != _treeSelectVersion) return;
@@ -305,15 +272,13 @@ public partial class MainWindow : Window
         }
         if (current == null) return;
 
-        string acc = root;
-        foreach (string segment in full[root.Length..].Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries))
+        foreach (string next in chain.Skip(1))
         {
             OpenAsIfClicked(current);
             await EnsureChildrenLoadedAsync(current);
             if (version != _treeSelectVersion) return;   // the user picked another folder while this one loaded
-            acc = Path.Combine(acc, segment);
             var child = current.Items.OfType<TreeViewItem>().FirstOrDefault(i =>
-                i.Tag is string t && string.Equals(t, acc, StringComparison.OrdinalIgnoreCase));
+                i.Tag is string t && string.Equals(t, next, PathUtil.Comparison));
             if (child == null) break;
             current = child;
         }
@@ -447,7 +412,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (ct.IsCancellationRequested || !string.Equals(path, _currentFolder, StringComparison.OrdinalIgnoreCase)) return;
+        if (ct.IsCancellationRequested || !string.Equals(path, _currentFolder, PathUtil.Comparison)) return;
 
         SetBusyProgress(files.Count, files.Count, $"Loading {files.Count:N0} images\u2026");
         Populate(files);
@@ -640,51 +605,25 @@ public partial class MainWindow : Window
     private void UpdateStatus()
     {
         SlideshowButton.IsEnabled = _items.Count > 0;
-        var sb = new StringBuilder();
-        sb.Append(_items.Count == 1 ? "1 image" : $"{_items.Count} images");
         var sel = SelectedItems();
-        if (sel.Count > 1) sb.Append($"  \u00B7  {sel.Count} selected");
-        else if (sel.Count == 1)
-        {
-            var item = sel[0];
-            sb.Append("  \u00B7  ").Append(item.FileName);
-            if (item.Info != null)
-                sb.Append("  \u00B7  ").Append(item.Info.PixelWidth).Append(" \u00D7 ").Append(item.Info.PixelHeight)
-                  .Append("  \u00B7  ").Append(FileSizeFormatter.Format((ulong)item.Info.FileSize));
-        }
-        StatusText.Text = sb.ToString();
+        var one = sel.Count == 1 ? sel[0] : null;
+        StatusText.Text = DisplayText.BrowserStatus(_items.Count, sel.Count, one?.FileName, one?.Info);
     }
 
     private void UpdateInfoPanel()
     {
         if (InfoPanel.Visibility != Visibility.Visible) return;
         var sel = SelectedItems();
+        InfoHeader.Text = DisplayText.InfoPanelHeader(sel.Count, sel.Count == 1 ? sel[0].FileName : null);
         if (sel.Count != 1)
         {
-            InfoHeader.Text = sel.Count == 0 ? "No selection" : $"{sel.Count} files selected";
             InfoBody.Text = "";
             return;
         }
 
-        var item = sel[0];
-        InfoHeader.Text = item.FileName;
-        var sb = new StringBuilder();
-        try
-        {
-            var fi = new FileInfo(item.Path);
-            sb.AppendLine($"Folder: {fi.DirectoryName}");
-            sb.AppendLine($"Size: {FileSizeFormatter.Format((ulong)fi.Length)}");
-            sb.AppendLine($"Modified: {fi.LastWriteTime:g}");
-        }
-        catch (IOException) { }
-        if (ImageService.TryReadSize(item.Path, out int w, out int h)) sb.AppendLine($"Dimensions: {w} \u00D7 {h}");
-        var exif = ExifReader.Read(item.Path);
-        if (exif != null)
-        {
-            string text = exif.ToDisplayString(_settings.InfoPanelMoreExif);
-            if (text.Length > 0) sb.AppendLine().AppendLine(text);
-        }
-        InfoBody.Text = sb.ToString();
+        string path = sel[0].Path;
+        (int, int)? pixelSize = ImageService.TryReadSize(path, out int w, out int h) ? (w, h) : null;
+        InfoBody.Text = DisplayText.InfoPanelBody(path, pixelSize, _settings.InfoPanelMoreExif);
     }
 
     private void SetInfoPanelVisible(bool visible)
@@ -708,7 +647,7 @@ public partial class MainWindow : Window
     private void BuildSortMenu()
     {
         SortMenu.Items.Clear();
-        foreach (var (field, label) in SortChoices)
+        foreach (var (field, label) in SortOrder.Choices)
         {
             var mi = new MenuItem { Header = label, Tag = field };
             mi.Click += OnSortClick;
@@ -721,7 +660,7 @@ public partial class MainWindow : Window
         foreach (MenuItem mi in SortMenu.Items)
         {
             var field = (SortField)mi.Tag;
-            string label = SortChoices.First(c => c.Field == field).Label;
+            string label = SortOrder.LabelFor(field);
             bool active = field == _listing.Order.Key;
             mi.IsChecked = active;
             mi.Header = label;
@@ -745,10 +684,7 @@ public partial class MainWindow : Window
     private async void OnSortClick(object sender, RoutedEventArgs e)
     {
         var field = (SortField)((MenuItem)sender).Tag;
-        SortOrder order;
-        if (field == _listing.Order.Key) order = _listing.Order.Reversed();   // choosing it again reverses it
-        else order = new SortOrder(field, Descending: field is SortField.DateModified or SortField.ExifDate or SortField.DateAdded); // dates default to newest first, as in the original
-        try { await ApplySortAsync(order); }
+        try { await ApplySortAsync(_listing.Order.Select(field)); }   // same field again reverses it; dates start newest first
         catch (Exception ex) { StatusText.Text = ex.Message; }
     }
 
@@ -779,25 +715,10 @@ public partial class MainWindow : Window
     private void StartSlideshow(bool fullScreen)
     {
         if (_items.Count == 0) return;
-        var selected = SelectedItems();
-
-        List<string> files;
-        int start;
-        if (selected.Count > 1)
-        {
-            // Several files selected: show just those, in grid order.
-            var wanted = selected.Select(i => i.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            files = _items.Where(i => wanted.Contains(i.Path)).Select(i => i.Path).ToList();
-            start = 0;
-        }
-        else
-        {
-            // One file (or none): show the whole folder, starting there.
-            files = _items.Select(i => i.Path).ToList();
-            start = selected.Count == 1 ? Math.Max(0, _items.IndexOf(selected[0])) : 0;
-        }
-
-        ShowSlideshow(files, start, _settings.IncludeSubfolders, _currentFolder, fullScreen);
+        // Several files selected: just those; one or none: the whole folder, starting there.
+        var target = StartupTarget.FromSelection(_items.Select(i => i.Path).ToList(),
+            SelectedItems().Select(i => i.Path).ToList(), _currentFolder);
+        ShowSlideshow(target.Files, target.StartIndex, _settings.IncludeSubfolders, target.Folder, fullScreen);
     }
 
     /// <summary>
@@ -844,7 +765,7 @@ public partial class MainWindow : Window
         _followTimer.Stop();
         if (_followPath is not { } path) return;
         _followPath = null;
-        if (string.Equals(path, _currentFolder, StringComparison.OrdinalIgnoreCase) || !Directory.Exists(path)) return;
+        if (string.Equals(path, _currentFolder, PathUtil.Comparison) || !Directory.Exists(path)) return;
 
         // The slideshow just showed this folder (with its subfolders if that option is on), so the browser
         // should too: make it the new root of the "include subfolders" tree rather than switching the option off.
@@ -961,8 +882,8 @@ public partial class MainWindow : Window
             OnToggleRandom(RandomCheck, e);
             e.Handled = true;
         }
-        else if (ctrl && (e.Key == Key.OemPlus || e.Key == Key.Add)) { _view.CellWidth += 20; e.Handled = true; }
-        else if (ctrl && (e.Key == Key.OemMinus || e.Key == Key.Subtract)) { _view.CellWidth -= 20; e.Handled = true; }
+        else if (ctrl && (e.Key == Key.OemPlus || e.Key == Key.Add)) { _view.CellWidth += ThumbnailGridMath.SizeStep; e.Handled = true; }
+        else if (ctrl && (e.Key == Key.OemMinus || e.Key == Key.Subtract)) { _view.CellWidth -= ThumbnailGridMath.SizeStep; e.Handled = true; }
     }
 
     /// <summary>False where Enter already does something: an open menu, a focused button or a text box.</summary>
@@ -1085,8 +1006,8 @@ public partial class MainWindow : Window
     }
     private void OnToggleInfoPanel(object sender, RoutedEventArgs e) => SetInfoPanelVisible(InfoPanel.Visibility != Visibility.Visible);
     private void OnToggleMoreExif(object sender, RoutedEventArgs e) { _settings.InfoPanelMoreExif = MenuMoreExif.IsChecked; UpdateInfoPanel(); }
-    private void OnLarger(object sender, RoutedEventArgs e) => _view.CellWidth += 20;
-    private void OnSmaller(object sender, RoutedEventArgs e) => _view.CellWidth -= 20;
+    private void OnLarger(object sender, RoutedEventArgs e) => _view.CellWidth += ThumbnailGridMath.SizeStep;
+    private void OnSmaller(object sender, RoutedEventArgs e) => _view.CellWidth -= ThumbnailGridMath.SizeStep;
     private void OnRefresh(object sender, RoutedEventArgs e) => Rescan();
 
     // ===============================================================================================
@@ -1174,9 +1095,7 @@ public partial class MainWindow : Window
     private void OnWatcherRootChanged()
     {
         // The folder we were showing is gone (deleted or renamed): fall back to its nearest existing parent.
-        string? p = _currentFolder;
-        while (!string.IsNullOrEmpty(p) && !Directory.Exists(p)) p = Path.GetDirectoryName(p);
-        if (!string.IsNullOrEmpty(p)) OpenFolder(p);
+        if (PathUtil.NearestExistingFolder(_currentFolder) is { } p) OpenFolder(p);
     }
 
     private void RemoveItem(string path)

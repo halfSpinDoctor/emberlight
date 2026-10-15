@@ -43,10 +43,16 @@ orientation rewrite), `FileComparers`/`SortOrder`, `DirectoryScanner`, `FolderWa
 (next/previous sibling folder), `ThumbnailGridMath` (virtualized-grid geometry), `PathUtil`, `AppSettings`,
 `FileListing` (the browser's sorted item list, kept in order as the watcher reports changes), `SubfolderScope`
 ("Include subfolders" tree root), `DecodePolicy` (thumbnail/slide decode sizes), `SlideshowCommands` (slideshow
-commands independent of keys; the window's `MapKey` is the Windows key binding and `Execute` runs them).
-This split is also groundwork for a possible macOS front end sharing Core; a list of further logic that could move
-out of the App was drawn up on 2026-10-15 (overlay/status text, thumbnail scheduling, viewer input maths, preload
-choice, grid arrow keys, rotate/delete outcomes, preferences diff, sort menu rules, path helpers).
+commands independent of keys; the window's `MapKey` is the Windows key binding and `Execute` runs them),
+`ImageInfo` (a decode's facts apart from the bitmap; the App's `LoadedImage` pairs it with a WPF bitmap),
+`DisplayText`/`SlideshowOverlay` (status bar, tooltip, info panel and slideshow overlay text and modes), `WindowFit`,
+`StartupArgs.BrowserFolder` and `StartupTarget.FromSelection`, and the sort menu's `SortOrder.Choices`/`Select`.
+Compare paths with `PathUtil.Comparer`/`PathUtil.Comparison`/`PathUtil.SamePath`, never a hard-coded
+`OrdinalIgnoreCase` (that stays only for file extensions), so case rules live in one place.
+This split is also groundwork for a possible macOS front end sharing Core. Logic that could still move out of the
+App (listed 2026-10-15): thumbnail scheduling (`ThumbnailLoader`), viewer input maths (keypad pan, wheel zoom steps,
+click-vs-drag threshold), which slides to preload, grid arrow-key movement, rotate/delete outcomes and the
+Preferences "what changed" step.
 
 ## Tests
 Custom dependency-free runner in `tests/Emberlight.Tests` (helpers in `TestHarness.cs`; synthetic EXIF/JPEG/PNG
@@ -56,7 +62,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~200 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~239 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.
