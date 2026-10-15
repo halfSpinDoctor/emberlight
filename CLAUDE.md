@@ -8,7 +8,9 @@ Naming (decided with the user): the app was developed as "Phoenix Slides for Win
 it doesn't reuse the original author's name. The attribution "Emberlight is a Windows port of Phoenix Slides by
 Dominic Yu" must stay prominent (README first lines, About box, installer comments, `LICENSE-NOTICE.md`); the license
 requires credit. The user rejected "Phoenix Photos" (too close to the original, and "Phoenix" is overloaded). The icon is
-kept as designed. `SettingsStore` migrates settings once from the old `%APPDATA%\PhoenixSlides` folder.
+kept as designed. Settings live in `%APPDATA%\Emberlight`; the one-time migration from the old `%APPDATA%\PhoenixSlides`
+folder was removed at the user's request (they were the only user), so the app itself mentions Phoenix Slides only as
+attribution.
 
 ## License - read before suggesting anything about distribution
 The original is **CC BY-NC-SA 2.0**; this port is an adaptation. Keep `LICENSE-NOTICE.md`, keep attribution,
@@ -48,7 +50,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~163 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~161 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.

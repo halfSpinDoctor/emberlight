@@ -114,10 +114,6 @@ EXIF orientation values 1-8, modelled as a flip plus a rotation.
   and unknown codes fall back to Name ascending.
 - **save and load round trip; no temp file left behind**: Saved settings load back unchanged (including the
   subfolder mode, "More EXIF details" and the two GIF options), and the atomic save leaves no `.tmp` file behind.
-- **settings from the old app name are copied across once, and never overwrite newer ones**: Settings in the old
-  `PhoenixSlides` folder are copied over once, the old file is kept, and the copy never overwrites newer settings.
-- **the legacy location is the old folder name and differs from the new one**: The old settings path uses
-  `PhoenixSlides`, the new one uses `Emberlight`, and the two are different.
 - **missing, corrupt or hostile files fall back to sane values**: A missing file, invalid JSON, `null`, or values
   out of range (including an unknown subfolder mode and a too-narrow info panel) all give defaults or clamped values instead of crashing.
 

@@ -492,7 +492,6 @@ internal static class CoreTests
         });
     }
 
-    private static bool AppSettingsStoreMigrate(string newPath, string legacyPath) => SettingsStore.MigrateLegacy(newPath, legacyPath);
 
     // ------------------------------------------------------------------------------------------
     static void SettingsTests()
@@ -538,30 +537,6 @@ internal static class CoreTests
             T.SeqEq(new[] { ".bmp" }, l.IgnoredFileTypes);
             T.Eq(SubfolderMode.Always, l.IncludeSubfoldersMode); T.True(l.InfoPanelMoreExif);
             T.True(!l.SlideshowPlayGifs && !l.SlideshowGifsFinish);
-        });
-        T.Run("settings from the old app name are copied across once, and never overwrite newer ones", () =>
-        {
-            using var d = new TempDir();
-            string legacy = d.File("old/PhoenixSlides/settings.json"), current = d.File("new/Emberlight/settings.json");
-            T.True(!AppSettingsStoreMigrate(current, legacy), "nothing to migrate yet");
-
-            var old = new AppSettings { LastFolderPath = @"C:\Photos\Old", ThumbCellWidth = 180 };
-            T.True(SettingsStore.Save(old, legacy));
-            T.True(AppSettingsStoreMigrate(current, legacy), "copied");
-            var loaded = SettingsStore.Load(current);
-            T.Eq(@"C:\Photos\Old", loaded.LastFolderPath); T.Eq(180.0, loaded.ThumbCellWidth);
-            T.True(File.Exists(legacy), "the old file is left in place");
-
-            // later changes to the new file must survive another launch
-            var newer = SettingsStore.Load(current); newer.LastFolderPath = @"C:\Photos\New";
-            T.True(SettingsStore.Save(newer, current));
-            T.True(!AppSettingsStoreMigrate(current, legacy), "not copied again");
-            T.Eq(@"C:\Photos\New", SettingsStore.Load(current).LastFolderPath);
-        });
-        T.Run("the legacy location is the old folder name and differs from the new one", () =>
-        {
-            T.True(SettingsStore.LegacyPath.Contains("PhoenixSlides") && SettingsStore.DefaultPath.Contains("Emberlight"));
-            T.True(SettingsStore.LegacyPath != SettingsStore.DefaultPath);
         });
         T.Run("missing, corrupt or hostile files fall back to sane values", () =>
         {

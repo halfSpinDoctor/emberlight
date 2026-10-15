@@ -114,34 +114,9 @@ public static class SettingsStore
     public static string DefaultPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Emberlight", "settings.json");
 
-    /// <summary>Where settings lived before the app was renamed (it was developed as "Phoenix Slides for Windows").</summary>
-    public static string LegacyPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PhoenixSlides", "settings.json");
-
-    /// <summary>
-    /// One-time migration: if there is no settings file at <paramref name="newPath"/> yet but there is one at
-    /// <paramref name="legacyPath"/>, copy it across. The old file is left in place and an existing new file is
-    /// never overwritten. Returns true if a file was copied.
-    /// </summary>
-    internal static bool MigrateLegacy(string newPath, string legacyPath)
-    {
-        try
-        {
-            if (File.Exists(newPath) || !File.Exists(legacyPath)) return false;
-            Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
-            File.Copy(legacyPath, newPath, overwrite: false);
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
-
     /// <summary>Loads settings; a missing or unreadable file silently yields defaults.</summary>
     public static AppSettings Load(string? path = null)
     {
-        if (path == null) MigrateLegacy(DefaultPath, LegacyPath);   // only for the real settings location
         path ??= DefaultPath;
         try
         {
