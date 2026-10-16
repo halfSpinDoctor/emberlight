@@ -13,6 +13,27 @@
          would skew how photos look. -->
 
     <Window.Resources>
+        <!-- Compact menus, matching the folder tree's 12 px text: Fluent's are 14 px text with a 49 px menu bar
+             and 36 px items. Used by the menu bar (drop-downs included, and the Sort By items created in code) and the
+             thumbnails' right-click menu. Fluent's templates hard-code their spacing, so OnMenuItemLoaded tightens it. -->
+        <Style x:Key="CompactMenuItem" TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+            <Setter Property="FontSize" Value="12"/>
+            <EventSetter Event="Loaded" Handler="OnMenuItemLoaded"/>
+        </Style>
+
+        <!-- Right-click on a thumbnail. Design rule: only items that are also in the menu bar, with the same names
+             and handlers. Right-clicking an unselected thumbnail selects just it; inside a selection, keeps it. -->
+        <ContextMenu x:Key="ThumbContextMenu" FontSize="12" Opened="OnThumbContextMenuOpened">
+            <ContextMenu.Resources>
+                <Style TargetType="MenuItem" BasedOn="{StaticResource CompactMenuItem}"/>
+            </ContextMenu.Resources>
+            <MenuItem Header="_Copy To..." Click="OnCopyTo"/>
+            <MenuItem Header="_Move To..." Click="OnMoveTo"/>
+            <MenuItem Tag="Rename" Header="Re_name..." InputGestureText="F2" Click="OnRename"/>
+            <Separator/>
+            <MenuItem Header="Move to Recycle _Bin" InputGestureText="Del" Click="OnDelete"/>
+        </ContextMenu>
+
         <!-- Zero padding/border/minimum size so every cell is exactly CellWidth + 2*margin wide; the visible-range
              maths in ThumbnailGridMath relies on that. Based on the theme's own style (Fluent), which otherwise
              adds padding and a minimum height. -->
@@ -24,6 +45,7 @@
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
             <Setter Property="VerticalContentAlignment" Value="Stretch"/>
+            <Setter Property="ContextMenu" Value="{StaticResource ThumbContextMenu}"/>
         </Style>
 
         <DataTemplate x:Key="ThumbTemplate" DataType="{x:Type vm:ThumbnailItem}">
@@ -46,23 +68,18 @@
         <!-- ============================ menu ============================ -->
         <Menu DockPanel.Dock="Top" FontSize="12">
             <Menu.Resources>
-                <!-- Compact menus, matching the folder tree's 12 px text: Fluent's are 14 px text with a 49 px menu bar
-                     and 36 px items. Applies to the drop-downs too, including the Sort By items created in code.
-                     Fluent's templates hard-code their spacing, so OnMenuItemLoaded tightens it. -->
-                <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
-                    <Setter Property="FontSize" Value="12"/>
-                    <EventSetter Event="Loaded" Handler="OnMenuItemLoaded"/>
-                </Style>
+                <Style TargetType="MenuItem" BasedOn="{StaticResource CompactMenuItem}"/>
             </Menu.Resources>
-            <MenuItem Header="_File">
+            <MenuItem Header="_File" SubmenuOpened="OnFileMenuOpened">
                 <MenuItem Header="_Open Folder..." InputGestureText="Ctrl+O" Click="OnOpenFolder"/>
                 <Separator/>
                 <MenuItem Header="Start _Slideshow" InputGestureText="Enter" Click="OnStartSlideshow"/>
                 <MenuItem Header="Start Slideshow in a _Window" Click="OnStartSlideshowWindowed"/>
                 <Separator/>
-                <MenuItem Header="Move to Recycle _Bin" InputGestureText="Del" Click="OnDelete"/>
                 <MenuItem Header="_Copy To..." Click="OnCopyTo"/>
                 <MenuItem Header="_Move To..." Click="OnMoveTo"/>
+                <MenuItem x:Name="MenuRename" Header="Re_name..." InputGestureText="F2" Click="OnRename"/>
+                <MenuItem Header="Move to Recycle _Bin" InputGestureText="Del" Click="OnDelete"/>
                 <Separator/>
                 <MenuItem Header="E_xit" InputGestureText="Alt+F4" Click="OnExit"/>
             </MenuItem>

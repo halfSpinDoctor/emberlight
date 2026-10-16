@@ -61,6 +61,10 @@ Core and the tests also build and run on Linux and macOS; the app itself needs W
   entry when you open a folder on it. New and deleted subfolders show up by themselves in the folder on screen, and
   anywhere else when you open a folder again; drives that connect later (a VPN, a USB stick) appear within a few
   seconds.
+* **Right-click menu on thumbnails** - Copy To, Move To, Rename and Move to Recycle Bin (the same commands as the
+  File menu).
+* **Rename** - `F2`, or File > Rename, renames the selected file in a small dialog. The name is checked as you type,
+  and changing the extension asks first.
 * **Info panel** - its width can be dragged, like the folder tree's, and is remembered.
 * **Preferences > View** - the View menu's settings (sort order, file names, subfolders, info panel) in one place.
 * **Colour picker** - the slideshow's colour preferences can be typed or picked from a small popup (preset swatches,

@@ -698,6 +698,21 @@ The browser's Delete command, with a fake Recycle Bin.
   failure line names the count and the first error, and there is none when everything went.
 - **afterwards the item at the old position is selected, or the last one**: And nothing when the list is empty.
 
+### FileRename
+The browser's Rename command, on real files.
+
+- **the dialog first selects the name without its extension**: Only the last extension is left out; a name with no
+  extension, or one that starts with its only dot, is selected whole.
+- **names Windows won't accept are explained, good ones pass**: Spaces at the ends are dropped; the unchanged name and
+  a change of case are fine; empty names, forbidden characters (and control characters), a trailing dot, over 255
+  characters and reserved device names (`CON`, `nul`, `COM1`, `lpt9.old`, `aux .jpg`) are refused with a reason.
+- **a name already taken in the folder is refused**: By a file or a subfolder.
+- **changing the extension asks first, and says when the file will leave the grid**: No question when only the
+  extension's case changes; the exact question for a change, and the wording for removing or adding one.
+- **renaming moves the file in its folder, never overwriting**: Contents kept; a taken name fails with a status line
+  and leaves the other file alone; the unchanged name does nothing; a missing file fails.
+- **a change of case only renames the file**: And leaves no temporary file behind.
+
 ### Preferences input
 - **auto-advance seconds: a number above 0 and up to an hour, in the user's number format**: Spaces, exponents and a
   German decimal comma are accepted; 0, negatives, over an hour, text, NaN, infinity and thousands separators are not.

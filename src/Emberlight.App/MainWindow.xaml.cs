@@ -931,7 +931,7 @@ public partial class MainWindow : Window
     // Keyboard
     // ===============================================================================================
 
-    /// <summary>Keys for the thumbnail grid itself (only while it has focus): Delete and moving the selection.</summary>
+    /// <summary>Keys for the thumbnail grid itself (only while it has focus): Delete, F2 (rename) and moving the selection.</summary>
     private void OnThumbKeyDown(object sender, KeyEventArgs e)
     {
         if (RunIfApplicable(MapGridKey(e.Key, Keyboard.Modifiers))) e.Handled = true;
@@ -957,6 +957,7 @@ public partial class MainWindow : Window
     private static BrowserInput MapGridKey(Key key, ModifierKeys mods)
     {
         if (key == Key.Delete) return new(BrowserCommand.Delete);
+        if (key == Key.F2 && mods == ModifierKeys.None) return new(BrowserCommand.Rename);
         if ((mods & (ModifierKeys.Shift | ModifierKeys.Control)) != 0) return default;   // leave extend-selection keys to the list
         return key switch
         {
@@ -1014,6 +1015,7 @@ public partial class MainWindow : Window
             case BrowserCommand.LargerThumbnails: _view.CellWidth += ThumbnailGridMath.SizeStep; break;
             case BrowserCommand.SmallerThumbnails: _view.CellWidth -= ThumbnailGridMath.SizeStep; break;
             case BrowserCommand.Delete: OnDelete(this, new RoutedEventArgs()); break;
+            case BrowserCommand.Rename: OnRename(this, new RoutedEventArgs()); break;
             case BrowserCommand.MoveSelection: MoveSelection(input.Move); break;
         }
     }
@@ -1069,6 +1071,49 @@ public partial class MainWindow : Window
         if (FileDeletion.SelectionAfter(index, _items.Count) is { } next) SelectOnly(next);
         UpdateStatus();
         if (result.FailureText is { } failure) StatusText.Text = failure;
+    }
+
+    /// <summary>Rename works on one file at a time, so the menu item is greyed out unless exactly one is selected.</summary>
+    private void OnFileMenuOpened(object sender, RoutedEventArgs e) => MenuRename.IsEnabled = SelectedItems().Count == 1;
+
+    /// <summary>The thumbnails' right-click menu (its items are all File menu items; see ThumbContextMenu).</summary>
+    private void OnThumbContextMenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ContextMenu menu) return;
+        foreach (var item in menu.Items.OfType<MenuItem>().Where(i => "Rename".Equals(i.Tag)))
+            item.IsEnabled = SelectedItems().Count == 1;
+    }
+
+    /// <summary>
+    /// Renames the selected file through <see cref="RenameWindow"/>, then puts it back in the grid under its new name
+    /// (moving it if the sort order says so), still selected. A name the browser doesn't show takes it out of the grid.
+    /// </summary>
+    private void OnRename(object sender, RoutedEventArgs e)
+    {
+        var sel = SelectedItems();
+        if (sel.Count != 1)
+        {
+            StatusText.Text = FileRename.SelectOneFile;
+            return;
+        }
+        string path = sel[0].Path;
+        var dlg = new RenameWindow(path, name => _types.IsSupportedFile(name)) { Owner = this };
+        if (dlg.ShowDialog() != true || FileRename.IsUnchanged(path, dlg.NewName)) return;
+
+        var result = FileRename.Rename(path, dlg.NewName);
+        if (result.NewPath is not { } newPath)
+        {
+            StatusText.Text = result.FailureText;
+            return;
+        }
+        RemoveItem(path);
+        if (_types.IsSupportedFile(newPath))
+        {
+            UpsertItem(newPath);
+            if (_listing.TryGet(newPath, out var item)) SelectOnly(_items.IndexOf(item));
+        }
+        UpdateStatus();
+        UpdateVisibleThumbnails();
     }
 
     private void OnCopyTo(object sender, RoutedEventArgs e) => TransferSelected(move: false);

@@ -69,6 +69,7 @@ internal static class InteractionTests
         PreloadTests();
         RotateTests();
         DeleteTests();
+        RenameTests();
         PreferencesTests();
         ColorTextTests();
     }
@@ -551,6 +552,89 @@ internal static class InteractionTests
             T.Eq<int?>(4, FileDeletion.SelectionAfter(7, 5), "deleted at the end: the new last item");
             T.Eq<int?>(0, FileDeletion.SelectionAfter(-1, 5));
             T.Eq<int?>(null, FileDeletion.SelectionAfter(0, 0), "nothing left");
+        });
+    }
+
+    static void RenameTests()
+    {
+        T.Group("FileRename");
+
+        T.Run("the dialog first selects the name without its extension", () =>
+        {
+            T.Eq((0, 5), FileRename.StemSelection("beach.jpg"));
+            T.Eq((0, 9), FileRename.StemSelection("beach.old.jpg"), "only the last extension is kept");
+            T.Eq((0, 5), FileRename.StemSelection("beach"), "no extension: the whole name");
+            T.Eq((0, 7), FileRename.StemSelection(".hidden.jpg"));
+            T.Eq((0, 4), FileRename.StemSelection(".jpg"), "a name that starts with its only dot: the whole name");
+        });
+
+        T.Run("names Windows won't accept are explained, good ones pass", () =>
+        {
+            using var d = new TempDir();
+            string a = d.Write("a.jpg", new byte[1]);
+            T.Eq(null, FileRename.Problem(a, "b.jpg"));
+            T.Eq(null, FileRename.Problem(a, "  b.jpg  "), "spaces at the ends are dropped");
+            T.Eq(null, FileRename.Problem(a, "a.jpg"), "unchanged is not a problem");
+            T.Eq(null, FileRename.Problem(a, "A.JPG"), "a change of case is allowed");
+            T.Eq(null, FileRename.Problem(a, "console.jpg"), "only exact device names are reserved");
+            T.Eq("Type a name for the file.", FileRename.Problem(a, "   "));
+            foreach (char c in FileRename.InvalidCharacters + "\t")
+                T.True(FileRename.Problem(a, $"x{c}y.jpg")?.StartsWith("A file name can't contain") == true, $"char {(int)c}");
+            T.Eq("A file name can't end with a dot.", FileRename.Problem(a, "b."));
+            T.True(FileRename.Problem(a, new string('x', 252) + ".jpg") != null, "256 characters is too long");
+            T.Eq(null, FileRename.Problem(a, new string('x', 251) + ".jpg"), "255 is fine");
+            foreach (string reserved in new[] { "CON.jpg", "nul", "Com1.tif", "lpt9.old.jpg", "aux .jpg" })
+                T.True(FileRename.Problem(a, reserved)?.Contains("reserves") == true, reserved);
+        });
+
+        T.Run("a name already taken in the folder is refused", () =>
+        {
+            using var d = new TempDir();
+            string a = d.Write("a.jpg", new byte[1]);
+            d.Write("b.jpg", new byte[1]);
+            Directory.CreateDirectory(d.File("folder"));
+            T.Eq("There is already a file named \"b.jpg\" in this folder.", FileRename.Problem(a, "b.jpg"));
+            T.True(FileRename.Problem(a, "folder") != null, "a subfolder's name is taken too");
+        });
+
+        T.Run("changing the extension asks first, and says when the file will leave the grid", () =>
+        {
+            T.Eq(null, FileRename.ExtensionChangeQuestion("a.jpg", "b.jpg", true));
+            T.Eq(null, FileRename.ExtensionChangeQuestion("a.jpg", "b.JPG", true), "case of the extension doesn't count");
+            T.Eq("If you change the extension from \".jpg\" to \".png\", the file may not open properly.\n\nAre you sure you want to change it?",
+                FileRename.ExtensionChangeQuestion("a.jpg", "a.png", true));
+            T.True(FileRename.ExtensionChangeQuestion("a.jpg", "a.txt", false)!.Contains("disappear from the browser"));
+            T.True(FileRename.ExtensionChangeQuestion("a.jpg", "a", false)!.StartsWith("If you remove the extension \".jpg\""));
+            T.True(FileRename.ExtensionChangeQuestion("a", "a.jpg", true)!.StartsWith("If you add the extension \".jpg\""));
+        });
+
+        T.Run("renaming moves the file in its folder, never overwriting", () =>
+        {
+            using var d = new TempDir();
+            string a = d.Write("a.jpg", new byte[] { 7 });
+            string b = d.Write("b.jpg", new byte[] { 8 });
+            var r = FileRename.Rename(a, " c.jpg ");
+            T.True(r.NewPath != null && PathUtil.SamePath(d.File("c.jpg"), r.NewPath), "new path");
+            T.True(!File.Exists(a) && File.ReadAllBytes(d.File("c.jpg"))[0] == 7, "moved, contents kept");
+            T.Eq(null, r.FailureText);
+
+            var taken = FileRename.Rename(d.File("c.jpg"), "b.jpg");
+            T.Eq(null, taken.NewPath);
+            T.True(taken.FailureText!.StartsWith("Couldn't rename the file: There is already"));
+            T.Eq((byte)8, File.ReadAllBytes(b)[0], "b untouched");
+
+            var same = FileRename.Rename(b, "b.jpg");
+            T.Eq(b, same.NewPath, "unchanged: nothing to do");
+            T.Eq(null, FileRename.Rename(d.File("gone.jpg"), "x.jpg").NewPath, "a missing file fails");
+        });
+
+        T.Run("a change of case only renames the file", () =>
+        {
+            using var d = new TempDir();
+            string a = d.Write("photo.jpg", new byte[] { 5 });
+            var r = FileRename.Rename(a, "Photo.JPG");
+            T.True(r.NewPath != null && r.NewPath.EndsWith("Photo.JPG"), $"new path {r.NewPath}");
+            T.SeqEq(new[] { "Photo.JPG" }, Directory.GetFiles(d.Path).Select(Path.GetFileName), "one file, new case, no temp left");
         });
     }
 

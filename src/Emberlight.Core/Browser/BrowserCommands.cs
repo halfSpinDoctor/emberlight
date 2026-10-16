@@ -17,6 +17,8 @@ public enum BrowserCommand
     SmallerThumbnails,
     /// <summary>Move the selected files to the Recycle Bin.</summary>
     Delete,
+    /// <summary>Rename the selected file (one file only).</summary>
+    Rename,
     /// <summary>Move the selection in the grid by <see cref="BrowserInput.Move"/>.</summary>
     MoveSelection,
 }

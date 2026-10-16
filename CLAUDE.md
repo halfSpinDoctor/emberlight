@@ -49,7 +49,7 @@ Core is grouped in area folders; the namespace is `Emberlight.Core` throughout (
 - **Imaging/** - `ExifReader`/`ExifData`, `ImageOrientation`, `ImageInfo`, `DecodePolicy`, `GifAnimation`
   (`GifCompositor`)/`GifAnimationBuilder`, `ImageViewport`/`ZoomMath`, `ViewerInput`.
 - **Files/** - `DirectoryScanner`, `FolderWatcher`, `FolderNavigator`, `FileComparers`/`SortOrder`, `FileTransfer`,
-  `FileEdits` (`OrientationEditor`, `FileDeletion`, `IRecycleBin`), `PathUtil`, `ImageFileTypes`, `StartupArgs`.
+  `FileEdits` (`OrientationEditor`, `FileDeletion`, `FileRename`, `IRecycleBin`), `PathUtil`, `ImageFileTypes`, `StartupArgs`.
 - **Settings/** - `AppSettings`/`SettingsStore`, `PreferencesInput`/`PreferencesFollowUp`, `ColorText`,
   `ColorPicker` (`ColorPickerModel`, `Hsv`).
 - **Common/** - `DisplayText`/`SlideshowOverlay` (all user-visible strings), `RandomizableList`, `LruCache`,
@@ -71,14 +71,33 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~363 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~369 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.
 - `VirtualizingGridPanel` (custom WPF panel) was written to WPF's real VirtualizingPanel contract; no problems
   reported so far, but it is the most intricate piece of UI code.
 
+## Design rules (decided with the user)
+- **Keep the window as simple as Phoenix Slides.** Don't add permanent on-screen controls (toolbars, buttons, panels)
+  unless they're clearly justified; prefer menu items, keyboard shortcuts and right-click menus, which cost nothing
+  until used. (Back/forward buttons for folders were turned down for this reason; pinned folders at the top of the
+  tree are still to be discussed.)
+- **Right-click menus only contain items that are also in the menu bar**, with the same names, shortcuts and
+  handlers. A right-click menu is a shortcut to existing commands, never a place for new ones.
+
 ## Behaviour decisions made with the user (keep these)
+- **Thumbnail right-click menu** (`ThumbContextMenu` in `MainWindow.xaml`, set on each grid cell by
+  `ThumbContainerStyle`): Copy To, Move To, Rename, then Move to Recycle Bin. The File menu lists them in the same
+  order. Right-clicking an unselected thumbnail selects just it; inside a selection it keeps the selection (the
+  ListBox's own behaviour). No menu on empty grid space.
+- **Rename** (File menu, right-click menu, `F2` in the grid): one file at a time (greyed out otherwise; F2 then says
+  so in the status bar), in a small dialog (`RenameWindow`) rather than editing on the thumbnail. The name without its
+  extension is selected at first. The name is checked as it is typed (`FileRename.Problem`: Windows' forbidden
+  characters, reserved device names, a trailing dot, 255 characters, a name already taken), and Rename is greyed out
+  while it's invalid. Changing the extension asks first (Yes/No), and says so if the file will leave the grid. A
+  change of case only works (through a temporary name). Afterwards the file stays selected under its new name.
+  The user tried the right-click menu and Rename in the app on 2026-10-16, including these cases; all worked.
 - **Image formats:** whatever WIC decodes natively (JPEG, PNG, TIFF, BMP, GIF). HEIC, WebP, RAW and JPEG 2000 are
   intentionally out of scope for now.
 - **Animated GIFs** play in the slideshow only (thumbnails show the first frame). WIC gives the frames and metadata
