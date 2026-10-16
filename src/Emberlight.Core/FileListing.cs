@@ -11,6 +11,10 @@ public enum UpsertResult
     Repositioned,
 }
 
+/// <summary>What <see cref="FileListing{TItem}.Reconcile"/> did.</summary>
+/// <param name="Replaced">True if the whole list was swapped in one step (many changes); false if changed in place.</param>
+public sealed record ReconcileResult(int Added, int Removed, bool Replaced);
+
 /// <summary>
 /// The browser's file list: one item per image, in sort order, looked up by path, and kept in order as the folder
 /// watcher reports changes. The items live in a list the UI supplies (on WPF, the observable collection the grid is
@@ -154,6 +158,54 @@ public sealed class FileListing<TItem> where TItem : class
         var late = _byPath.Where(kv => !placed.Contains(kv.Key)).Select(kv => kv.Value).ToList();
         _replaceAll(ordered);
         foreach (var item in late) _items.Insert(FindInsertIndex(_pathOf(item)), item);
+    }
+
+    /// <summary>Above this many files gone plus files new, <see cref="Reconcile"/> swaps the whole list in one step.</summary>
+    public const int DefaultMaxSteps = 200;
+
+    /// <summary>
+    /// Brings the list in line with a fresh scan of the folder on screen (<paramref name="sortedPaths"/>, in
+    /// <see cref="Order"/>) without starting over: files still there keep their items, and so their thumbnails and
+    /// selection. A few changes are made one by one (the grid only redraws what moved); more than
+    /// <paramref name="maxSteps"/>, or a different order, swap the whole list in one step, still reusing the items.
+    /// </summary>
+    public ReconcileResult Reconcile(IReadOnlyList<string> sortedPaths, int maxSteps = DefaultMaxSteps)
+    {
+        var wanted = new HashSet<string>(sortedPaths, PathUtil.Comparer);
+        var removed = _byPath.Keys.Where(k => !wanted.Contains(k)).ToList();
+        var added = sortedPaths.Where(p => !_byPath.ContainsKey(p)).Distinct(PathUtil.Comparer).ToList();
+        if (removed.Count == 0 && added.Count == 0) return new ReconcileResult(0, 0, false);
+        foreach (string path in removed) _meta.Invalidate(path);
+
+        // One by one only works if the files that stay are already in the scan's order (a date sort can reorder them).
+        var keptNow = _items.Select(_pathOf).Where(wanted.Contains);
+        var keptInScan = sortedPaths.Where(_byPath.ContainsKey);
+        if (removed.Count + added.Count <= maxSteps && keptNow.SequenceEqual(keptInScan, PathUtil.Comparer))
+        {
+            foreach (string path in removed)
+                if (_byPath.Remove(path, out var gone)) _items.Remove(gone);
+            foreach (string path in added)
+            {
+                var item = _create(path);
+                _byPath[path] = item;
+                _items.Insert(FindInsertIndex(path), item);
+            }
+            return new ReconcileResult(added.Count, removed.Count, false);
+        }
+
+        var next = new Dictionary<string, TItem>(PathUtil.Comparer);
+        var ordered = new List<TItem>(sortedPaths.Count);
+        foreach (string path in sortedPaths)
+        {
+            if (next.ContainsKey(path)) continue;
+            var item = _byPath.TryGetValue(path, out var existing) ? existing : _create(path);
+            next[path] = item;
+            ordered.Add(item);
+        }
+        _byPath.Clear();
+        foreach (var (path, item) in next) _byPath[path] = item;
+        _replaceAll(ordered);
+        return new ReconcileResult(added.Count, removed.Count, true);
     }
 
     private int FindInsertIndex(string path)

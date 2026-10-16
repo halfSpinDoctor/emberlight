@@ -76,7 +76,7 @@ public partial class MainWindow : Window
         _watcher = new FolderWatcher(_scanner.ShouldShowFile);
         _watcher.FilesChanged += (changed, deleted) => Dispatcher.BeginInvoke(new Action(() => OnWatcherChanged(changed, deleted)));
         _watcher.RootChanged += () => Dispatcher.BeginInvoke(new Action(OnWatcherRootChanged));
-        _watcher.RescanNeeded += () => Dispatcher.BeginInvoke(new Action(Rescan));
+        _watcher.RescanNeeded += () => Dispatcher.BeginInvoke(new Action(() => Rescan()));
         _watcher.FoldersChanged += folders => Dispatcher.BeginInvoke(new Action(() => RefreshTreeFolders(folders)));
         _view.PropertyChanged += OnViewSettingsChanged;
 
@@ -448,38 +448,48 @@ public partial class MainWindow : Window
     // Navigation and scanning
     // ===============================================================================================
 
-    private async void NavigateTo(string path)
+    /// <param name="inPlace">Rescanning the folder on screen: keep the grid as it is while scanning, then update it in
+    /// place (<see cref="ApplyRescan"/>), so nothing flickers. Opening a folder (or F5) starts from an empty grid.</param>
+    private async void NavigateTo(string path, bool inPlace = false)
     {
-        try { await NavigateToAsync(path); }
+        try { await NavigateToAsync(path, inPlace); }
         catch (Exception ex) { StatusText.Text = ex.Message; }
     }
 
-    private async Task NavigateToAsync(string path)
+    private async Task NavigateToAsync(string path, bool inPlace = false)
     {
         _scanCts?.Cancel();
         var cts = _scanCts = new CancellationTokenSource();
         var ct = cts.Token;
 
+        inPlace &= _currentFolder != null && PathUtil.SamePath(path, _currentFolder);
         if (_subfolders.BeforeNavigate(_currentFolder, path)) SyncMenuState();   // left the tree: it switched itself off
         _isLoading = true;
         _currentFolder = path;
         _watcher.Stop();
-        _loader.Reset();
         _listing.ResetMetadata();
-        Title = DisplayText.BrowserTitle(path);
-
-        // Show an empty grid and a busy indicator immediately, so the user can see the click was received.
-        _keepFirst = _keepEnd = 0;
-        _listing.Clear();
-        SlideshowButton.IsEnabled = false;
-        BeginBusy(DisplayText.ScanStarted);
+        if (inPlace)
+        {
+            // Only show the busy indicator if the scan takes a moment, so a quick rescan changes nothing on screen.
+            _ = ShowBusySoonAsync(ct);
+        }
+        else
+        {
+            _loader.Reset();
+            Title = DisplayText.BrowserTitle(path);
+            // Show an empty grid and a busy indicator immediately, so the user can see the click was received.
+            _keepFirst = _keepEnd = 0;
+            _listing.Clear();
+            SlideshowButton.IsEnabled = false;
+            BeginBusy(DisplayText.ScanStarted);
+        }
 
         var comparer = _listing.Comparer;
         bool recurse = _settings.IncludeSubfolders;
         // Progress<T> captures the UI context, so this callback runs on the UI thread.
         var scanProgress = new Progress<int>(n =>
         {
-            if (!ct.IsCancellationRequested) StatusText.Text = DisplayText.Scanning(n);
+            if (!ct.IsCancellationRequested && IsBusyShown) StatusText.Text = DisplayText.Scanning(n);
         });
 
         List<string> files;
@@ -489,7 +499,7 @@ public partial class MainWindow : Window
             if (ct.IsCancellationRequested) return;
 
             // Sorting by a file-system or EXIF date has to open every file, which can take a while.
-            BeginBusy(DisplayText.Sorting(files.Count, _listing.Order));
+            if (IsBusyShown) BeginBusy(DisplayText.Sorting(files.Count, _listing.Order));
             await Task.Run(() => files.Sort(comparer), ct);
         }
         catch (OperationCanceledException) { return; }      // a newer navigation owns the status bar now
@@ -503,8 +513,12 @@ public partial class MainWindow : Window
 
         if (ct.IsCancellationRequested || !string.Equals(path, _currentFolder, PathUtil.Comparison)) return;
 
-        SetBusyProgress(files.Count, files.Count, DisplayText.Loading(files.Count));
-        Populate(files);
+        if (inPlace) ApplyRescan(files);
+        else
+        {
+            SetBusyProgress(files.Count, files.Count, DisplayText.Loading(files.Count));
+            Populate(files);
+        }
 
         _watcher.Watch(path, recurse);
         if (_pendingSelectPath != null && _listing.TryGet(_pendingSelectPath, out var wanted))
@@ -516,6 +530,33 @@ public partial class MainWindow : Window
         _isLoading = false;
         EndBusy();
         UpdateStatus();
+    }
+
+    private bool IsBusyShown => BusyItem.Visibility == Visibility.Visible;
+
+    private async Task ShowBusySoonAsync(CancellationToken ct)
+    {
+        try { await Task.Delay(400, ct); }
+        catch (OperationCanceledException) { return; }
+        if (_isLoading) BeginBusy(DisplayText.ScanStarted);
+    }
+
+    /// <summary>
+    /// Updates the grid from a rescan of the folder on screen without starting over (<see cref="FileListing{TItem}.Reconcile"/>):
+    /// pictures still there keep their thumbnails, selection and place, so the grid doesn't flash.
+    /// </summary>
+    private void ApplyRescan(List<string> files)
+    {
+        var selected = SelectedItems();
+        if (_listing.Reconcile(files).Replaced)
+        {
+            // The whole list was swapped (many changes): any item may have moved, and the selection needs putting back.
+            _keepFirst = 0;
+            _keepEnd = _items.Count;
+            foreach (var item in selected)
+                if (_listing.TryGet(item.Path, out var same) && ReferenceEquals(same, item)) ThumbList.SelectedItems.Add(item);
+        }
+        UpdateVisibleThumbnails();
     }
 
     /// <summary>
@@ -608,11 +649,13 @@ public partial class MainWindow : Window
 
     private void EndBusy() => BusyItem.Visibility = Visibility.Collapsed;
 
-    private void Rescan()
+    /// <param name="startOver">F5 / Refresh: reload everything from an empty grid. Otherwise (the watcher, the
+    /// subfolders switch, Preferences) the grid is updated in place, without flicker.</param>
+    private void Rescan(bool startOver = false)
     {
         if (_currentFolder == null) return;
         RefreshTreeFolders([_currentFolder]);
-        NavigateTo(_currentFolder);
+        NavigateTo(_currentFolder, inPlace: !startOver);
     }
 
     // ===============================================================================================
@@ -956,7 +999,7 @@ public partial class MainWindow : Window
     {
         switch (input.Command)
         {
-            case BrowserCommand.Rescan: Rescan(); break;
+            case BrowserCommand.Rescan: Rescan(startOver: true); break;
             case BrowserCommand.StartSlideshow: StartSlideshow(_settings.SlideshowDefaultFullScreen); break;
             case BrowserCommand.OpenFolder: OnOpenFolder(this, new RoutedEventArgs()); break;
             case BrowserCommand.ToggleInfoPanel: SetInfoPanelVisible(InfoPanel.Visibility != Visibility.Visible); break;
@@ -1083,7 +1126,7 @@ public partial class MainWindow : Window
     private void OnToggleMoreExif(object sender, RoutedEventArgs e) { _settings.InfoPanelMoreExif = MenuMoreExif.IsChecked; UpdateInfoPanel(); }
     private void OnLarger(object sender, RoutedEventArgs e) => _view.CellWidth += ThumbnailGridMath.SizeStep;
     private void OnSmaller(object sender, RoutedEventArgs e) => _view.CellWidth -= ThumbnailGridMath.SizeStep;
-    private void OnRefresh(object sender, RoutedEventArgs e) => Rescan();
+    private void OnRefresh(object sender, RoutedEventArgs e) => Rescan(startOver: true);
 
     // ===============================================================================================
     // Menu: preferences / about

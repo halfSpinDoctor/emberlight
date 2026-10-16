@@ -461,6 +461,90 @@ internal static class BrowserTests
             Consistent(l, items);
         });
 
+        T.Run("a rescan with a few changes updates the list in place, keeping the items that stayed", () =>
+        {
+            var items = new List<Item>();
+            int bulk = 0;
+            var l = new FileListing<Item>(items, p => new Item(p), i => i.Path, SortOrder.Default,
+                all => { bulk++; var list = all.ToList(); items.Clear(); items.AddRange(list); });
+            l.Populate([P("img1.jpg"), P("img2.jpg"), P("img5.jpg"), P("img9.jpg")]);
+            bulk = 0;
+            var keep1 = items[0]; var keep9 = items[3];
+            var r = l.Reconcile([P("img1.jpg"), P("img3.jpg"), P("img9.jpg"), P("img10.jpg")]);
+            T.SeqEq(["img1.jpg", "img3.jpg", "img9.jpg", "img10.jpg"], Names(items));
+            T.True(ReferenceEquals(keep1, items[0]) && ReferenceEquals(keep9, items[2]), "same item objects (thumbnails kept)");
+            T.Eq((2, 2, false), (r.Added, r.Removed, r.Replaced));
+            T.Eq(0, bulk, "no whole-list replace, so the grid isn't redrawn from scratch");
+            Consistent(l, items);
+        });
+
+        T.Run("a rescan with many changes swaps the list in one go, still reusing items", () =>
+        {
+            var items = new List<Item>();
+            int bulk = 0;
+            var l = new FileListing<Item>(items, p => new Item(p), i => i.Path, SortOrder.Default,
+                all => { bulk++; var list = all.ToList(); items.Clear(); items.AddRange(list); });
+            l.Populate([P("keep.jpg")]);
+            bulk = 0;
+            var keep = items[0];
+            var many = Enumerable.Range(0, 50).Select(i => P($"new{i:D2}.jpg")).Append(P("keep.jpg")).ToList();
+            many.Sort(l.Comparer);
+            var r = l.Reconcile(many, maxSteps: 10);
+            T.True(r.Replaced); T.Eq(1, bulk, "one replace");
+            T.Eq(51, items.Count); T.Eq(50, r.Added); T.Eq(0, r.Removed);
+            T.True(items.Any(i => ReferenceEquals(i, keep)), "the item that stayed is reused");
+            T.SeqEq(many, items.Select(i => i.Path));
+            Consistent(l, items);
+        });
+
+        T.Run("a rescan whose files came back in a different order swaps the list, in the new order", () =>
+        {
+            // By date, a file edited meanwhile can move; inserting into the old order would put new files in the wrong place.
+            var items = new List<Item>();
+            int bulk = 0;
+            var l = new FileListing<Item>(items, p => new Item(p), i => i.Path, SortOrder.Default,
+                all => { bulk++; var list = all.ToList(); items.Clear(); items.AddRange(list); });
+            l.Populate([P("b.jpg"), P("a.jpg")]);                // as a date sort had them
+            bulk = 0;
+            var r = l.Reconcile([P("a.jpg"), P("b.jpg"), P("c.jpg")]);
+            T.True(r.Replaced, "swapped rather than patched");
+            T.SeqEq(["a.jpg", "b.jpg", "c.jpg"], Names(items));
+            T.Eq(1, bulk);
+            Consistent(l, items);
+        });
+
+        T.Run("a rescan with nothing changed does nothing", () =>
+        {
+            var items = new List<Item>();
+            int bulk = 0;
+            var l = new FileListing<Item>(items, p => new Item(p), i => i.Path, SortOrder.Default,
+                all => { bulk++; var list = all.ToList(); items.Clear(); items.AddRange(list); });
+            l.Populate([P("a.jpg"), P("b.jpg")]);
+            bulk = 0;
+            var r = l.Reconcile([P("A.JPG"), P("b.jpg")]);
+            T.Eq((0, 0, false), (r.Added, r.Removed, r.Replaced));
+            T.Eq(0, bulk); T.Eq("a.jpg", items[0].ToString(), "the original item, not a renamed copy");
+        });
+
+        T.Run("fuzz: reconciling always leaves exactly the rescanned files, in order, reusing items", () =>
+        {
+            string[] all = Enumerable.Range(0, 30).Select(i => P($"img{i}.jpg")).ToArray();
+            for (int seed = 0; seed < 200; seed++)
+            {
+                var rnd = new Random(seed);
+                var items = new List<Item>();
+                var l = Listing(items);
+                var before = all.Where(_ => rnd.Next(2) == 0).ToList(); before.Sort(l.Comparer);
+                var after = all.Where(_ => rnd.Next(2) == 0).ToList(); after.Sort(l.Comparer);
+                l.Populate(before);
+                var old = items.ToDictionary(i => i.Path, PathUtil.Comparer);
+                l.Reconcile(after, maxSteps: rnd.Next(0, 40));
+                T.SeqEq(after, items.Select(i => i.Path), $"seed {seed}");
+                T.True(items.Where(i => old.ContainsKey(i.Path)).All(i => ReferenceEquals(i, old[i.Path])), "kept items reused");
+                Consistent(l, items);
+            }
+        });
+
         T.Run("sorting an empty list does nothing", () =>
         {
             var items = new List<Item>();

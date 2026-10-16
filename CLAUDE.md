@@ -76,7 +76,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~358 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~363 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.
@@ -115,6 +115,12 @@ are timing based and could be flaky on a loaded CI machine.
   The Preferences View tab mirrors the View menu's settings (sort, filenames, subfolders, info panel, More EXIF
   details, which is now persisted) and the Slideshow tab mirrors the Slideshow menu.
 - **Loading feedback:** status-bar progress bar and text while scanning/sorting/loading a folder.
+- **Rescans of the folder on screen don't flicker** (the watcher's RescanNeeded, e.g. a subfolder deleted with
+  subfolders included; the subfolders switch; Preferences): the grid stays as it is while scanning and is then updated
+  in place (`FileListing.Reconcile`, `MainWindow.ApplyRescan`), keeping thumbnails, selection and scroll position; the
+  busy indicator appears only if the scan takes over 400 ms. F5 / View > Refresh still reloads from an empty grid
+  (the user's "start over", and it also catches edits a watcher overflow missed). Measured: the old path blanked the
+  grid for a couple of frames during a 1,500-file rescan; the in-place path never did.
 - **Slideshow Ctrl+Right / Ctrl+Left:** jump to the next/previous *sibling* folder in natural name order. Skips
   folders with no images, stops at the ends (beep + message, no wrap-around), keeps random mode (new folder starts
   on its first image, then shuffled). The reference folder is the folder the slideshow was started from (or last

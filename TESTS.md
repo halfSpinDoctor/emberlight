@@ -511,6 +511,14 @@ list of stand-in items where the app uses the grid's observable collection.
   applying the sorted order isn't lost (the old browser code dropped it from the grid).
 - **a file removed while sorting stays removed**: Applying a sorted order made before a removal doesn't bring the file
   back.
+- **a rescan with a few changes updates the list in place, keeping the items that stayed**: Same item objects (so
+  thumbnails stay), new files at their sorted places, and no whole-list replace (so the grid isn't redrawn).
+- **a rescan with many changes swaps the list in one go, still reusing items**: Above the step limit.
+- **a rescan whose files came back in a different order swaps the list, in the new order**: A date sort can reorder
+  files; patching the old order would misplace new ones.
+- **a rescan with nothing changed does nothing**: Including a name that only differs in case.
+- **fuzz: reconciling always leaves exactly the rescanned files, in order, reusing items**: 200 seeded random
+  before/after pairs with random step limits.
 - **sorting an empty list does nothing**: No errors on an empty folder.
 - **only name, path and type sorts can skip opening the files**: `SortOrder.NeedsFileInspection` is true for the date
   and size sorts, which show "Sorting..." rather than "Preparing...".
