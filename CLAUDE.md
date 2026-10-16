@@ -36,37 +36,29 @@ workflow have not been confirmed on Windows - verify them on first use. WPF can'
 
 ## Architecture rule: decisions live in Core, UI stays thin
 `src/Emberlight.Core` (no dependencies, unit tested) holds every piece of real logic. `src/Emberlight.App`
-(WPF) only renders, routes input and calls Core. When adding a feature, write the logic in Core with tests first and
-keep the WPF side to glue. Notable Core pieces: `RandomizableList`, `SlideshowState` (navigation), `ImageViewport`
-(zoom/pan/fit), `ImageOrientation` (EXIF 1-8 as flip+rotate), `ExifReader` (own TIFF/EXIF parser; in-place
-orientation rewrite), `FileComparers`/`SortOrder`, `DirectoryScanner`, `FolderWatcher`, `FolderNavigator`
-(next/previous sibling folder), `ThumbnailGridMath` (virtualized-grid geometry), `PathUtil`, `AppSettings`,
-`FileListing` (the browser's sorted item list, kept in order as the watcher reports changes), `SubfolderScope`
-("Include subfolders" tree root), `DecodePolicy` (thumbnail/slide decode sizes), `SlideshowCommands` (slideshow
-commands independent of keys; the window's `MapKey` is the Windows key binding and `Execute` runs them),
-`ImageInfo` (a decode's facts apart from the bitmap; the App's `LoadedImage` pairs it with a WPF bitmap),
-`DisplayText`/`SlideshowOverlay` (status bar, tooltip, info panel and slideshow overlay text and modes), `WindowFit`,
-`StartupArgs.BrowserFolder` and `StartupTarget.FromSelection`, the sort menu's `SortOrder.Choices`/`Select`,
-`ThumbnailScheduler` (newest-first thumbnail queue with staleness checks; the App's `ThumbnailLoader` only supplies
-the WIC decoder and the Dispatcher), `ThumbnailGridMath.ReleasedIndices`/`MoveTarget` (thumbnail release, grid
-keys), `ViewerInput` (wheel/keypad/drag maths), `SlidePreload`, `OrientationEditor` and `FileDeletion` (rotate and
-delete outcomes; the Recycle Bin is platform code behind `IRecycleBin`), `PreferencesInput`/`PreferencesFollowUp`
-(field checks, rescan/re-sort after OK) and `ColorText` (colour preferences without WPF's ColorConverter; it doesn't
-read the `sc#` scRGB form, which ColorConverter does), `BrowserCommand`/`BrowserCommands` (browser keys as commands; the
-window's `MapWindowKey`/`MapGridKey` are the Windows bindings and `Execute` runs them), `SlideshowHelp`/`KeyHelp` (the
-help screen's topics and layout; the slideshow window's `HelpKeys` supplies the Windows key names, keep it in step
-with `MapKey`) and `FolderJumper` (Ctrl+Right/Left: reference folder, key repeat, background search, messages),
-`FileTransfer.TransferAll` (Copy/Move To outcome), `SlideshowFollow` (the browser following slideshow folder jumps, and
-what to select when a slideshow closes; the 400 ms timer stays in WPF), `StartupArgs.Plan` (command-line startup:
-slideshow or not, where the browser opens), `FolderTreeRoots` (the starred shortcuts and drive slotting) and
-`GifAnimationBuilder` (GIF memory cap, disposal codes, canvas fallback; WIC's metadata queries stay in
-`ImageService`). User-visible strings are in `DisplayText` (status bar, titles, slideshow and Preferences messages).
+(WPF) only renders, routes input (key maps, focus rules) and makes platform calls (WIC, Recycle Bin, dialogs, drag and
+drop). When adding a feature, write the logic in Core with tests first and keep the WPF side to glue.
+Core is grouped in area folders; the namespace is `Emberlight.Core` throughout (folders only, no sub-namespaces):
+- **Browser/** - `FileListing` (sorted grid items, `Reconcile`), `SubfolderScope`, `BrowserCommands` (keys as
+  commands), `FolderTreeRoots`/`TreeChildren`, `ClickExpandTracker`, `ThumbnailGridMath`, `ThumbnailScheduler`.
+- **Slideshow/** - `SlideshowState` (navigation), `SlideshowCommands`, `KeyHelp`/`SlideshowHelp`, `FolderJumper`
+  (Ctrl+Right/Left), `SlideshowFollow`, `SlidePreload`, `WindowFit`, `WheelStepper`.
+- **Imaging/** - `ExifReader`/`ExifData`, `ImageOrientation`, `ImageInfo`, `DecodePolicy`, `GifAnimation`
+  (`GifCompositor`)/`GifAnimationBuilder`, `ImageViewport`/`ZoomMath`, `ViewerInput`.
+- **Files/** - `DirectoryScanner`, `FolderWatcher`, `FolderNavigator`, `FileComparers`/`SortOrder`, `FileTransfer`,
+  `FileEdits` (`OrientationEditor`, `FileDeletion`, `IRecycleBin`), `PathUtil`, `ImageFileTypes`, `StartupArgs`.
+- **Settings/** - `AppSettings`/`SettingsStore`, `PreferencesInput`/`PreferencesFollowUp`, `ColorText`,
+  `ColorPicker` (`ColorPickerModel`, `Hsv`).
+- **Common/** - `DisplayText`/`SlideshowOverlay` (all user-visible strings), `RandomizableList`, `LruCache`,
+  `ListExtensions`, `NaturalStringComparer`, `FileSizeFormatter`, `BuildVersion`.
+
+Windows-side pairings to keep in step: the slideshow window's `MapKey` (keys to `SlideshowCommand`) and `HelpKeys`
+(key names for `SlideshowHelp`); the main window's `MapWindowKey`/`MapGridKey` (keys to `BrowserCommand`). WIC's GIF
+metadata queries stay in `ImageService`; `ColorText` doesn't read WPF's `sc#` scRGB form.
 Compare paths with `PathUtil.Comparer`/`PathUtil.Comparison`/`PathUtil.SamePath`, never a hard-coded
 `OrdinalIgnoreCase` (that stays only for file extensions), so case rules live in one place.
-This split is also groundwork for a possible macOS front end sharing Core. As of 2026-10-16 the list of logic still
-to move out of the App is empty (a further pass moved browser keys, slideshow help, folder jumps, transfers,
-slideshow follow, messages, startup routing, tree roots and GIF building); what remains in the App is WPF rendering,
-input routing (key maps, focus rules) and platform calls (WIC, Recycle Bin, dialogs, drag and drop).
+As of 2026-10-16 nothing is left to move out of the App, and the plan is to stop extracting unless a macOS front end
+(which would share Core) becomes real; prefer keeping new logic next to its area's existing types.
 
 ## Tests
 Custom dependency-free runner in `tests/Emberlight.Tests` (helpers in `TestHarness.cs`; synthetic EXIF/JPEG/PNG

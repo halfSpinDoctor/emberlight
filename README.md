@@ -26,19 +26,19 @@ Core and the tests also build and run on Linux and macOS; the app itself needs W
 
 | Original (Objective-C) | Port |
 |---|---|
-| `DYRandomizableArray` | `Core/RandomizableList` |
-| `NSMutableArray+DYMovable` | `Core/ListExtensions` |
+| `DYRandomizableArray` | `Core/Common/RandomizableList` |
+| `NSMutableArray+DYMovable` | `Core/Common/ListExtensions` |
 | `NSIndexSetSymDiffExtension` | not needed (`SortedSet<T>.SymmetricExceptWith`) |
-| `CreeveyMainWindowController` comparators | `Core/FileComparers`, `SortOrder`, `NaturalStringComparer` |
-| exiftags, `DYExiftags` | `Core/ExifReader` (JPEG/TIFF/PNG; in-place orientation edit; embedded thumbnails) |
-| `SlideshowWindow` navigation | `Core/SlideshowState`, `Core/SlideshowCommands`, `Core/KeyHelp`, `Core/FolderJumper`; UI in `App/SlideshowWindow` |
-| `DYImageView` zoom/layout | `Core/ImageViewport`, `Core/ViewerInput`; UI in `App/Controls/ImageViewerControl` |
-| `DYWrappingMatrix` | `App/MainWindow` thumbnail `ListBox` with `App/Controls/VirtualizingGridPanel`; geometry in `Core/ThumbnailGridMath`; sorted list in `Core/FileListing` |
-| `DYImageCache` | `Core/LruCache`, `Core/DecodePolicy`, `Core/ThumbnailScheduler`, `Core/SlidePreload` + `App/Services/ImageService`, `ThumbnailLoader` (WIC) |
-| `DYFileWatcher` / `VDKQueue` | `Core/FolderWatcher` |
-| `UKPrefsPanel`, NSUserDefaults | `App/PreferencesWindow`, `Core/AppSettings` (JSON in `%APPDATA%\Emberlight`), `Core/PreferencesInput`, `Core/ColorText`, `Core/ColorPicker` |
+| `CreeveyMainWindowController` comparators | `Core/Files/FileComparers`, `Core/Files/SortOrder`, `Core/Common/NaturalStringComparer` |
+| exiftags, `DYExiftags` | `Core/Imaging/ExifReader` (JPEG/TIFF/PNG; in-place orientation edit; embedded thumbnails) |
+| `SlideshowWindow` navigation | `Core/Slideshow/SlideshowState`, `Core/Slideshow/SlideshowCommands`, `Core/Slideshow/KeyHelp`, `Core/Slideshow/FolderJumper`; UI in `App/SlideshowWindow` |
+| `DYImageView` zoom/layout | `Core/Imaging/ImageViewport`, `Core/Imaging/ViewerInput`; UI in `App/Controls/ImageViewerControl` |
+| `DYWrappingMatrix` | `App/MainWindow` thumbnail `ListBox` with `App/Controls/VirtualizingGridPanel`; geometry in `Core/Browser/ThumbnailGridMath`; sorted list in `Core/Browser/FileListing` |
+| `DYImageCache` | `Core/Common/LruCache`, `Core/Imaging/DecodePolicy`, `Core/Browser/ThumbnailScheduler`, `Core/Slideshow/SlidePreload` + `App/Services/ImageService`, `ThumbnailLoader` (WIC) |
+| `DYFileWatcher` / `VDKQueue` | `Core/Files/FolderWatcher` |
+| `UKPrefsPanel`, NSUserDefaults | `App/PreferencesWindow`, `Core/Settings/AppSettings` (JSON in `%APPDATA%\Emberlight`), `Core/Settings/PreferencesInput`, `Core/Settings/ColorText`, `Core/Settings/ColorPicker` |
 | `DirBrowserDelegate` | folder `TreeView` in `App/MainWindow` |
-| `DYCarbonGoodies` (file-type helpers) | `Core/ImageFileTypes` |
+| `DYCarbonGoodies` (file-type helpers) | `Core/Files/ImageFileTypes` |
 
 ## Additions beyond the original
 
@@ -64,7 +64,7 @@ Core and the tests also build and run on Linux and macOS; the app itself needs W
 * **Info panel** - its width can be dragged, like the folder tree's, and is remembered.
 * **Preferences > View** - the View menu's settings (sort order, file names, subfolders, info panel) in one place.
 * **Colour picker** - the slideshow's colour preferences can be typed or picked from a small popup (preset swatches,
-  a saturation/brightness square, hue and opacity bars). Logic: `Core/ColorPicker`.
+  a saturation/brightness square, hue and opacity bars). Logic: `Core/Settings/ColorPicker`.
 
 **Slideshow**
 
@@ -83,7 +83,7 @@ Core and the tests also build and run on Linux and macOS; the app itself needs W
   it, otherwise the slide's own folder. So starting in an empty root folder with "Include subfolders" on moves on to
   the root's next sibling rather than between the root's subfolders. "Include subfolders" carries over. The browser
   quietly follows to the new folder, so closing the slideshow leaves it showing, and selecting, what you were just
-  viewing. Logic: `Core/FolderNavigator`.
+  viewing. Logic: `Core/Files/FolderNavigator`.
 * **Animated GIFs** - see below.
 
 ## Image formats

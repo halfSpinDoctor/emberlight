@@ -8,19 +8,19 @@ namespace Emberlight.Core;
 public static class ViewerInput
 {
     /// <summary>Wheel delta of one notch (Windows' WHEEL_DELTA).</summary>
-    public const double WheelNotch = 120;
+    private const double WheelNotch = 120;
 
     /// <summary>The original scrolls 128 px per wheel notch when the picture can pan.</summary>
-    public const double PanPerNotch = 128;
+    private const double PanPerNotch = 128;
 
     /// <summary>Ctrl+wheel: 25% bigger per notch up, 20% smaller per notch down (so up then down is back to the start).</summary>
-    public const double WheelZoomIn = 0.25, WheelZoomOut = -0.2;
+    private const double WheelZoomIn = 0.25, WheelZoomOut = -0.2;
 
     /// <summary>A press that moves further than this (in DIPs, on either axis) is a drag, not a click.</summary>
-    public const double DragThreshold = 3;
+    private const double DragThreshold = 3;
 
     /// <summary>From this scale up, pixels are drawn as crisp squares instead of being smoothed.</summary>
-    public const double PixelatedScale = 3;
+    private const double PixelatedScale = 3;
 
     /// <summary>The relative zoom for one Ctrl+wheel event (any upward delta zooms in, anything else zooms out).</summary>
     public static double WheelZoomStep(int wheelDelta) => wheelDelta > 0 ? WheelZoomIn : WheelZoomOut;
