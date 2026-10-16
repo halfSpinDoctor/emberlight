@@ -152,7 +152,7 @@ public partial class SlideshowWindow : Window
                 StopGif();
                 Viewer.Clear();
                 _current = null;
-                ShowMessage(_state.Files.Count == 0 ? "No images" : "No more images\n(press \u2190 or Esc)");
+                ShowMessage(DisplayText.PastEnd(_state.Files.Count));
                 UpdateInfo();
                 return;
             }
@@ -192,7 +192,7 @@ public partial class SlideshowWindow : Window
         if (img == null)
         {
             Viewer.Clear();
-            ShowMessage("Could not open\n" + Path.GetFileName(path));
+            ShowMessage(DisplayText.CouldNotOpen(path));
             UpdateInfo();
             return;
         }
@@ -210,7 +210,7 @@ public partial class SlideshowWindow : Window
             _gif.Start();
         }
 
-        if (!_fullScreen) Title = Path.GetFileName(path) + " \u2014 Emberlight";
+        if (!_fullScreen) Title = DisplayText.SlideshowTitle(path);
         UpdateInfo();
     }
 
@@ -617,7 +617,7 @@ public partial class SlideshowWindow : Window
         if (_state.Files.Count == 0) { SystemSounds.Beep.Play(); return; }
         bool on = !_state.RandomMode;
         _state.SetRandom(on);
-        ShowToast(on ? "Random order: ON  (reshuffled)" : "Random order: OFF  (continuing in sort order)");
+        ShowToast(DisplayText.RandomToggled(on));
         UpdateInfo();
     }
 
@@ -639,7 +639,7 @@ public partial class SlideshowWindow : Window
         if (_state.CurrentFile is not { } path) return;
         if (!RecycleBin.Instance.TryDelete(path, out string? error))
         {
-            ShowMessage("Couldn't move to the Recycle Bin:\n" + error);
+            ShowMessage(DisplayText.RecycleFailed(error));
             return;
         }
         _cache.Remove(path);

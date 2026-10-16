@@ -142,8 +142,6 @@ public static class ImageService
         }
     }
 
-    /// <summary>Animated GIFs whose frames would need more memory than this are shown as still pictures.</summary>
-    private const long MaxGifFrameBytes = 256L * 1024 * 1024;
 
     /// <summary>
     /// Reads an animated GIF's frames and the metadata needed to play them (position, delay, disposal; canvas size).
@@ -158,31 +156,24 @@ public static class ImageService
             var decoder = new GifBitmapDecoder(fs, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
             if (decoder.Frames.Count < 2) return null;
 
-            var frames = new List<GifFrame>(decoder.Frames.Count);
-            long bytes = 0;
-            int right = 0, bottom = 0;
+            // GifAnimationBuilder (Core) keeps the memory in bounds, maps the disposal codes and sizes the canvas;
+            // this only reads the frames and their metadata out of WIC.
+            var builder = new GifAnimationBuilder();
             foreach (var f in decoder.Frames)
             {
                 var md = f.Metadata as BitmapMetadata;
-                int left = QueryInt(md, "/imgdesc/Left"), top = QueryInt(md, "/imgdesc/Top");
                 int w = f.PixelWidth, h = f.PixelHeight;
-                bytes += (long)w * h * 4;
-                if (bytes > MaxGifFrameBytes) return null;
+                if (!builder.TryReserve(w, h)) return null;           // too big to hold: show it still
 
                 var px = new byte[w * h * 4];
                 new FormatConvertedBitmap(f, PixelFormats.Bgra32, null, 0).CopyPixels(px, w * 4, 0);   // transparent -> alpha 0
-                int disposal = QueryInt(md, "/grctlext/Disposal");
-                frames.Add(new GifFrame(left, top, w, h, QueryInt(md, "/grctlext/Delay"),
-                    disposal is >= 0 and <= 3 ? (GifDisposal)disposal : GifDisposal.Unspecified, px));
-                right = Math.Max(right, left + w);
-                bottom = Math.Max(bottom, top + h);
+                builder.Add(QueryInt(md, "/imgdesc/Left"), QueryInt(md, "/imgdesc/Top"), w, h,
+                    QueryInt(md, "/grctlext/Delay"), QueryInt(md, "/grctlext/Disposal"), px);
             }
 
-            // The canvas ("logical screen") size is in the file header; fall back to the frames' extent if it's missing.
+            // The canvas ("logical screen") size is in the file header; the builder falls back to the frames' extent.
             var header = decoder.Metadata;
-            int width = QueryInt(header, "/logscrdesc/Width"), height = QueryInt(header, "/logscrdesc/Height");
-            if (width <= 0 || height <= 0) (width, height) = (right, bottom);
-            return new GifAnimation(width, height, frames);
+            return builder.Build(QueryInt(header, "/logscrdesc/Width"), QueryInt(header, "/logscrdesc/Height"));
         }
         catch (Exception)
         {

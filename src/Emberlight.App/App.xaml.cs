@@ -17,26 +17,15 @@ public partial class App : Application
         Settings = SettingsStore.Load();
         ImageService.InitPlaceholders();
 
-        // Files/folders passed on the command line ("Open with", drag onto the exe) go straight to a slideshow.
-        // The browser opens behind it, so closing the slideshow returns to the browser instead of quitting.
-        if (e.Args.Length > 0 && Settings.OpenFilesDoSlideshow)
-        {
-            var types = new ImageFileTypes();
-            types.ApplyIgnored(Settings.IgnoredFileTypes);
-            var scanner = new DirectoryScanner(types);
-            var comparer = FileComparers.For(Settings.SortOrder);
-            var target = StartupArgs.Resolve(e.Args, scanner, comparer, Settings.StartupSlideshowSubfolders);
-            if (target != null && target.Files.Count > 0)
-            {
-                var browser = new MainWindow(Settings, target.Folder ?? target.Files[target.StartIndex]);
-                browser.Show();
-                browser.ShowSlideshow(target.Files, target.StartIndex, Settings.StartupSlideshowSubfolders, target.Folder,
-                    Settings.SlideshowDefaultFullScreen);
-                return;
-            }
-        }
-
-        new MainWindow(Settings, e.Args.FirstOrDefault()).Show();
+        // Files/folders passed on the command line ("Open with", drag onto the exe) go straight to a slideshow when
+        // that preference is on. The browser opens behind it, so closing the slideshow returns to the browser instead
+        // of quitting. StartupArgs.Plan (Core) decides.
+        var plan = StartupArgs.Plan(e.Args, Settings);
+        var browser = new MainWindow(Settings, plan.BrowserPath);
+        browser.Show();
+        if (plan.Slideshow is { } show)
+            browser.ShowSlideshow(show.Files, show.StartIndex, Settings.StartupSlideshowSubfolders, show.Folder,
+                Settings.SlideshowDefaultFullScreen);
     }
 
     private void OnUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)

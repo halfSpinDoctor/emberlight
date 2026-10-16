@@ -30,8 +30,33 @@ public sealed record StartupTarget(IReadOnlyList<string> Files, int StartIndex, 
     }
 }
 
+/// <summary>How the app starts: where the browser opens, and the slideshow to show in front of it, if any.</summary>
+/// <param name="BrowserPath">A folder or file for the browser to open (see <see cref="StartupArgs.BrowserFolder"/>);
+/// null for its usual startup folder.</param>
+public sealed record StartupPlan(string? BrowserPath, StartupTarget? Slideshow);
+
 public static class StartupArgs
 {
+    /// <summary>
+    /// Decides how to start from the command line ("Open with", or files dropped on the program). With the "start a
+    /// slideshow" preference on and something showable given, a slideshow opens with the browser behind it at that
+    /// folder (or at the first picture shown, when the files came from several places), so quitting the slideshow
+    /// returns to the browser instead of closing the app. Otherwise just the browser, at the first argument.
+    /// </summary>
+    public static StartupPlan Plan(IReadOnlyList<string> args, AppSettings settings)
+    {
+        if (args.Count > 0 && settings.OpenFilesDoSlideshow)
+        {
+            var types = new ImageFileTypes();
+            types.ApplyIgnored(settings.IgnoredFileTypes);
+            var target = Resolve(args, new DirectoryScanner(types), FileComparers.For(settings.SortOrder),
+                settings.StartupSlideshowSubfolders);
+            if (target != null && target.Files.Count > 0)
+                return new StartupPlan(target.Folder ?? target.Files[target.StartIndex], target);
+        }
+        return new StartupPlan(args.FirstOrDefault(), null);
+    }
+
     /// <summary>
     /// The folder the browser opens at startup: the folder given on the command line, or the folder of a file given
     /// there (which is then selected: <paramref name="fileToSelect"/>); otherwise the last folder or the chosen

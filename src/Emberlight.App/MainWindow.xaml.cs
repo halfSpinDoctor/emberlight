@@ -33,8 +33,8 @@ public partial class MainWindow : Window
 
     private string? _currentFolder;
     private string? _pendingSelectPath;
-    private readonly DispatcherTimer _followTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
-    private string? _followPath;           // folder the slideshow most recently jumped to; the browser follows after a short pause
+    private readonly DispatcherTimer _followTimer = new() { Interval = SlideshowFollow.Delay };
+    private readonly SlideshowFollow _follow = new();   // the browser follows a slideshow's folder jumps after a short pause
     private bool _isLoading;               // a folder navigation is in progress
     private int _keepFirst, _keepEnd;     // items in [_keepFirst, _keepEnd) may hold a decoded thumbnail
     private CancellationTokenSource? _scanCts;
@@ -148,20 +148,10 @@ public partial class MainWindow : Window
 
         var (shortcuts, drives) = await Task.Run(() =>
         {
-            var found = new List<(string Path, string Label)>();
-            void AddQuick(string? path, string label)
-            {
-                if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path)) found.Add((path, "\u2605 " + label));   // star marks the shortcuts
-            }
-            AddQuick(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Pictures");
-            AddQuick(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Desktop");
-            AddQuick(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Documents");
-            AddQuick(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"), "Downloads");
-
             DriveInfo[] all;
             try { all = DriveInfo.GetDrives(); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { all = []; }
-            return (found, all);
+            return (FolderTreeRoots.Shortcuts(), all);
         });
 
         foreach (var (path, label) in shortcuts) FolderTree.Items.Add(MakeTreeItem(path, label));
@@ -181,8 +171,7 @@ public partial class MainWindow : Window
             if (!isReady) return;
             // Continuations run on the UI thread, so the slot arithmetic can't race with another drive's.
             ready[i] = true;
-            int slot = firstDriveIndex + ready.Take(i).Count(r => r);
-            FolderTree.Items.Insert(slot, MakeTreeItem(drive.RootDirectory.FullName, drive.Name));
+            FolderTree.Items.Insert(FolderTreeRoots.DriveSlot(ready, i, firstDriveIndex), MakeTreeItem(drive.RootDirectory.FullName, drive.Name));
         }
     }
 
@@ -247,7 +236,7 @@ public partial class MainWindow : Window
 
         string root = chain[0];
         TreeViewItem? FindRoot() => FolderTree.Items.OfType<TreeViewItem>().FirstOrDefault(i =>
-            i.Tag is string t && PathUtil.SamePath(t, root) && !i.Header.ToString()!.StartsWith('\u2605'));
+            i.Tag is string t && PathUtil.SamePath(t, root) && !FolderTreeRoots.IsShortcut(i.Header.ToString()!));
         await _treeRootsListed;
         if (version != _treeSelectVersion) return;
         var current = FindRoot();
@@ -375,20 +364,20 @@ public partial class MainWindow : Window
         _watcher.Stop();
         _loader.Reset();
         _listing.ResetMetadata();
-        Title = $"{new DirectoryInfo(path).Name} \u2014 Emberlight";
+        Title = DisplayText.BrowserTitle(path);
 
         // Show an empty grid and a busy indicator immediately, so the user can see the click was received.
         _keepFirst = _keepEnd = 0;
         _listing.Clear();
         SlideshowButton.IsEnabled = false;
-        BeginBusy("Scanning folder\u2026");
+        BeginBusy(DisplayText.ScanStarted);
 
         var comparer = _listing.Comparer;
         bool recurse = _settings.IncludeSubfolders;
         // Progress<T> captures the UI context, so this callback runs on the UI thread.
         var scanProgress = new Progress<int>(n =>
         {
-            if (!ct.IsCancellationRequested) StatusText.Text = $"Scanning\u2026 {n:N0} images found";
+            if (!ct.IsCancellationRequested) StatusText.Text = DisplayText.Scanning(n);
         });
 
         List<string> files;
@@ -398,9 +387,7 @@ public partial class MainWindow : Window
             if (ct.IsCancellationRequested) return;
 
             // Sorting by a file-system or EXIF date has to open every file, which can take a while.
-            BeginBusy(_listing.Order.NeedsFileInspection
-                ? $"Sorting {files.Count:N0} images\u2026"
-                : $"Preparing {files.Count:N0} images\u2026");
+            BeginBusy(DisplayText.Sorting(files.Count, _listing.Order));
             await Task.Run(() => files.Sort(comparer), ct);
         }
         catch (OperationCanceledException) { return; }      // a newer navigation owns the status bar now
@@ -414,7 +401,7 @@ public partial class MainWindow : Window
 
         if (ct.IsCancellationRequested || !string.Equals(path, _currentFolder, PathUtil.Comparison)) return;
 
-        SetBusyProgress(files.Count, files.Count, $"Loading {files.Count:N0} images\u2026");
+        SetBusyProgress(files.Count, files.Count, DisplayText.Loading(files.Count));
         Populate(files);
 
         _watcher.Watch(path, recurse);
@@ -690,7 +677,7 @@ public partial class MainWindow : Window
         if (_items.Count == 0) return;
 
         var selected = SelectedItems();
-        StatusText.Text = "Sorting\u2026";
+        StatusText.Text = DisplayText.Resorting;
         await _listing.SortAsync();
 
         // Indices just moved, so any item might now be far from the viewport: treat everything as possibly
@@ -727,17 +714,17 @@ public partial class MainWindow : Window
         show.Closed += (_, _) =>
         {
             FlushFolderFollow();       // if the browser hasn't caught up with the last jump yet, do it now
-            if (show.LastShownPath is { } p)
+            string? last = show.LastShownPath;
+            ThumbnailItem? item = null;
+            switch (SlideshowFollow.AfterClose(last, last != null && _listing.TryGet(last, out item), _isLoading))
             {
-                if (_listing.TryGet(p, out var item))
-                {
+                case CloseSelection.Select:
                     ThumbList.SelectedItem = item;
                     ThumbList.ScrollIntoView(item);
-                }
-                else if (_isLoading)
-                {
-                    _pendingSelectPath = p;    // the folder is still loading; select the slide when it arrives
-                }
+                    break;
+                case CloseSelection.SelectWhenLoaded:
+                    _pendingSelectPath = last;    // the folder is still loading; select the slide when it arrives
+                    break;
             }
             Activate();
         };
@@ -750,7 +737,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnSlideshowFolderJumped(string folder)
     {
-        _followPath = folder;
+        _follow.Jumped(folder);
         _followTimer.Stop();
         _followTimer.Start();
     }
@@ -758,9 +745,7 @@ public partial class MainWindow : Window
     private void FlushFolderFollow()
     {
         _followTimer.Stop();
-        if (_followPath is not { } path) return;
-        _followPath = null;
-        if (string.Equals(path, _currentFolder, PathUtil.Comparison) || !Directory.Exists(path)) return;
+        if (_follow.TakeFolderToOpen(_currentFolder, Directory.Exists) is not { } path) return;
 
         // The slideshow just showed this folder (with its subfolders if that option is on), so the browser
         // should too: make it the new root of the "include subfolders" tree rather than switching the option off.
@@ -949,21 +934,7 @@ public partial class MainWindow : Window
         var dlg = new OpenFolderDialog { Title = move ? "Move selected files to..." : "Copy selected files to..." };
         if (dlg.ShowDialog(this) != true) return;
 
-        int done = 0, failed = 0; string? firstError = null;
-        foreach (var item in sel)
-        {
-            try
-            {
-                if (move) { FileTransfer.MoveInto(item.Path, dlg.FolderName); RemoveItem(item.Path); }
-                else FileTransfer.CopyInto(item.Path, dlg.FolderName);
-                done++;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                failed++; firstError ??= ex.Message;
-            }
-        }
-        StatusText.Text = $"{(move ? "Moved" : "Copied")} {done} file(s)" + (failed > 0 ? $"; {failed} failed: {firstError}" : "");
+        StatusText.Text = FileTransfer.TransferAll(sel.Select(i => i.Path), dlg.FolderName, move, RemoveItem).Summary;
     }
 
     // ===============================================================================================
@@ -1044,11 +1015,11 @@ public partial class MainWindow : Window
         // folder, thumbnail size and sort order instead of stale values.
         CaptureSessionState();
         if (!SettingsStore.Save(_settings))
-            MessageBox.Show(this, "Your preferences were applied, but they couldn't be saved to disk.\n\n" + SettingsStore.DefaultPath,
+            MessageBox.Show(this, DisplayText.PreferencesNotSaved(SettingsStore.DefaultPath),
                 "Emberlight", MessageBoxButton.OK, MessageBoxImage.Warning);
 
         if (rescan) Rescan();                    // different file types or subfolders: the file list changes
-        else StatusText.Text = "Preferences saved";
+        else StatusText.Text = DisplayText.PreferencesSaved;
         try { await resort; }
         catch (Exception ex) { StatusText.Text = ex.Message; }
     }

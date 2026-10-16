@@ -55,11 +55,18 @@ delete outcomes; the Recycle Bin is platform code behind `IRecycleBin`), `Prefer
 read the `sc#` scRGB form, which ColorConverter does), `BrowserCommand`/`BrowserCommands` (browser keys as commands; the
 window's `MapWindowKey`/`MapGridKey` are the Windows bindings and `Execute` runs them), `SlideshowHelp`/`KeyHelp` (the
 help screen's topics and layout; the slideshow window's `HelpKeys` supplies the Windows key names, keep it in step
-with `MapKey`) and `FolderJumper` (Ctrl+Right/Left: reference folder, key repeat, background search, messages).
+with `MapKey`) and `FolderJumper` (Ctrl+Right/Left: reference folder, key repeat, background search, messages),
+`FileTransfer.TransferAll` (Copy/Move To outcome), `SlideshowFollow` (the browser following slideshow folder jumps, and
+what to select when a slideshow closes; the 400 ms timer stays in WPF), `StartupArgs.Plan` (command-line startup:
+slideshow or not, where the browser opens), `FolderTreeRoots` (the starred shortcuts and drive slotting) and
+`GifAnimationBuilder` (GIF memory cap, disposal codes, canvas fallback; WIC's metadata queries stay in
+`ImageService`). User-visible strings are in `DisplayText` (status bar, titles, slideshow and Preferences messages).
 Compare paths with `PathUtil.Comparer`/`PathUtil.Comparison`/`PathUtil.SamePath`, never a hard-coded
 `OrdinalIgnoreCase` (that stays only for file extensions), so case rules live in one place.
-This split is also groundwork for a possible macOS front end sharing Core. As of 2026-10-15 the list of logic still
-to move out of the App is empty; what remains in the App is WPF rendering, input routing and platform calls.
+This split is also groundwork for a possible macOS front end sharing Core. As of 2026-10-16 the list of logic still
+to move out of the App is empty (a further pass moved browser keys, slideshow help, folder jumps, transfers,
+slideshow follow, messages, startup routing, tree roots and GIF building); what remains in the App is WPF rendering,
+input routing (key maps, focus rules) and platform calls (WIC, Recycle Bin, dialogs, drag and drop).
 
 ## Tests
 Custom dependency-free runner in `tests/Emberlight.Tests` (helpers in `TestHarness.cs`; synthetic EXIF/JPEG/PNG
@@ -69,7 +76,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~321 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~346 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.

@@ -7,6 +7,45 @@ public static class DisplayText
 {
     private const string Dot = "  ·  ";
     private const string Times = " × ";
+    private const string AppName = "Emberlight";
+
+    // ---- loading a folder (status bar) --------------------------------------------------------------
+
+    public const string ScanStarted = "Scanning folder…";
+    public const string Resorting = "Sorting…";
+
+    public static string Scanning(int found) => $"Scanning… {found:N0} images found";
+
+    /// <summary>After scanning: "Sorting…" when the order needs every file opened (dates, size), else "Preparing…".</summary>
+    public static string Sorting(int count, SortOrder order)
+        => order.NeedsFileInspection ? $"Sorting {count:N0} images…" : $"Preparing {count:N0} images…";
+
+    public static string Loading(int count) => $"Loading {count:N0} images…";
+
+    // ---- window titles -------------------------------------------------------------------------------
+
+    public static string BrowserTitle(string folder) => $"{new DirectoryInfo(folder).Name} — {AppName}";
+
+    public static string SlideshowTitle(string path) => $"{Path.GetFileName(path)} — {AppName}";
+
+    // ---- slideshow messages -----------------------------------------------------------------------
+
+    /// <summary>Shown after the last slide (every remaining file was deleted), or for an empty slideshow.</summary>
+    public static string PastEnd(int slideCount) => slideCount == 0 ? "No images" : "No more images\n(press ← or Esc)";
+
+    public static string CouldNotOpen(string path) => "Could not open\n" + Path.GetFileName(path);
+
+    public static string RandomToggled(bool on)
+        => on ? "Random order: ON  (reshuffled)" : "Random order: OFF  (continuing in sort order)";
+
+    public static string RecycleFailed(string? error) => "Couldn't move to the Recycle Bin:\n" + error;
+
+    // ---- preferences ---------------------------------------------------------------------------------
+
+    public const string PreferencesSaved = "Preferences saved";
+
+    public static string PreferencesNotSaved(string settingsPath)
+        => "Your preferences were applied, but they couldn't be saved to disk.\n\n" + settingsPath;
 
     /// <summary>Browser status bar: how many images, then what is selected.</summary>
     /// <param name="selectedName">The selected file's name when exactly one is selected.</param>

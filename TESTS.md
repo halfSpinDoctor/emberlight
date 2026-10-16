@@ -783,3 +783,58 @@ Ctrl+Right / Ctrl+Left in the slideshow. The tests use a folder tree with siblin
 - **key repeat while a folder is still loading is ignored**: Silently, with a time limit so a regression fails
   instead of hanging the test run.
 - **with subfolders on, a folder whose images are all in subfolders counts**.
+
+
+---
+
+## FlowTests.cs
+
+### File transfer results
+Copy To / Move To (`FileTransfer.TransferAll`).
+
+- **copying counts each file and keeps the originals**: And the "Copied 2 file(s)" summary.
+- **moving reports each file that went, and the first error for the rest**: Only moved files are reported (so the
+  browser takes just those out of the grid); the summary gives the failures and the first error.
+- **nothing to transfer: nothing done**.
+
+### Slideshow follow
+The browser following a slideshow's folder jumps (`SlideshowFollow`).
+
+- **the browser opens the folder the slideshow last jumped to**: Only the last of several quick jumps, and only once.
+- **not if it is already showing that folder, or the folder has gone**: The same folder in any case; a deleted one is
+  forgotten.
+- **nothing jumped: nothing to open**.
+- **the pause before following is 400 ms**.
+- **when the slideshow closes: select its last slide, or remember it while the folder loads**: All the cases.
+
+### DisplayText (messages)
+- **loading a folder: scanning, sorting or preparing, then loading**: "Sorting" only when the order opens every file.
+- **window titles: the folder or picture, then the app's name**.
+- **slideshow messages**: End of show, couldn't open, random order on/off, Recycle Bin failure.
+- **preferences saved, or not**.
+
+### Startup plan
+How the app starts from the command line (`StartupArgs.Plan`).
+
+- **no arguments: the browser on its own, at its usual folder**.
+- **a picture opened with the app: a slideshow of its folder, the browser behind it there**: Starting on that picture.
+- **with the slideshow preference off, the browser opens at the argument**.
+- **several files from different places: the browser opens at the first one shown**.
+- **nothing showable (an ignored type, or a missing file): just the browser, at the argument**.
+
+### Folder tree roots
+- **shortcuts: Pictures, Desktop, Documents, Downloads, starred, for the folders that exist**: Missing folders are left
+  out.
+- **a starred label marks a shortcut, not a drive**.
+- **drives slot in letter order, after the shortcuts, as each one answers**: Drives answering in any order end up in
+  letter order.
+
+### GifAnimationBuilder
+Putting an animated GIF together from the decoder's frames.
+
+- **frames become an animation on the canvas size from the file**: Positions, delays and disposal carried through.
+- **a missing canvas size falls back to the area the frames cover**: Either side missing.
+- **a single frame is not an animation**: Nor are no frames.
+- **frames that would need more than the memory limit are refused**: Exactly at the limit is fine; a refused frame
+  isn't counted; the default limit is 256 MB.
+- **disposal codes 0-3 map to their meaning; anything else is unspecified**.

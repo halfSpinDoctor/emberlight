@@ -12,4 +12,5 @@ BrowserTests.RunAll();
 InteractionTests.RunAll();
 ColorTests.RunAll();
 CommandTests.RunAll();
+FlowTests.RunAll();
 return T.Summary();
