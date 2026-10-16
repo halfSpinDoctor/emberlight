@@ -48,6 +48,21 @@ internal static class FlowTests
             T.True(!File.Exists(a) && File.Exists(dest.File("a.jpg")));
         });
 
+        T.Run("moving files into the folder they are already in leaves them, and in the grid", () =>
+        {
+            using var d = new TempDir();
+            string a = d.Write("a.jpg", [1]), b = d.Write("b.jpg", [2]);
+            using var other = new TempDir();
+            string c = other.Write("c.jpg", [3]);
+            var moved = new List<string>();
+            var r = FileTransfer.TransferAll([a, c, b], d.Path + Path.DirectorySeparatorChar, move: true, moved.Add);
+            T.SeqEq(new[] { c }, moved, "only the file that really moved is reported");
+            T.Eq(1, r.Done); T.Eq(2, r.AlreadyThere); T.Eq(0, r.Failed);
+            T.Eq("Moved 1 file(s); 2 already in that folder", r.Summary);
+            T.True(File.Exists(a) && File.Exists(b), "nothing moved or deleted");
+            T.True(!File.Exists(d.File("a (2).jpg")), "no renamed copy either");
+        });
+
         T.Run("nothing to transfer: nothing done", () =>
         {
             using var dest = new TempDir();

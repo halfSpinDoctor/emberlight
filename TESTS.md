@@ -795,6 +795,9 @@ Copy To / Move To (`FileTransfer.TransferAll`).
 - **copying counts each file and keeps the originals**: And the "Copied 2 file(s)" summary.
 - **moving reports each file that went, and the first error for the rest**: Only moved files are reported (so the
   browser takes just those out of the grid); the summary gives the failures and the first error.
+- **moving files into the folder they are already in leaves them, and in the grid**: They aren't reported as moved
+  (so they stay in the grid), aren't renamed, and the summary says "N already in that folder"; a trailing separator
+  on the folder makes no difference.
 - **nothing to transfer: nothing done**.
 
 ### Slideshow follow

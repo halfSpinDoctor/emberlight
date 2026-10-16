@@ -76,7 +76,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~346 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~347 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.
@@ -149,6 +149,8 @@ are timing based and could be flaky on a loaded CI machine.
   solid `ApplicationBackgroundBrush` rather than Fluent's translucent Mica (wallpaper tint would skew photos). The
   slideshow window stays black by design.
 - "Rotate" in the browser edits the EXIF orientation tag only (lossless); there is no pixel rotation.
+- **Move To:** read-only files move like any other (as in Explorer; the user chose to keep it). Moving files into the
+  folder they are already in leaves them where they are and in the grid ("N already in that folder").
 
 ## Gotchas learned the hard way
 - Name the sort-field enum `SortField` (a `SortKey` collides with `System.Globalization.SortKey`).
