@@ -44,7 +44,7 @@ public partial class ColorPickerButton : UserControl
             var swatch = new Button
             {
                 Style = (Style)Resources["PresetSwatch"],
-                Background = BrushFor(ColorText.TryParse(preset, out uint argb) ? argb : 0),
+                Background = SwatchBrush(ColorText.TryParse(preset, out uint argb) ? argb : 0),
                 ToolTip = preset == "#00000000" ? "Transparent" : preset,
                 Tag = argb,
             };
@@ -100,7 +100,7 @@ public partial class ColorPickerButton : UserControl
 
     private void RefreshSwatch()
     {
-        SwatchFill.Background = _valid ? BrushFor(_model.Argb) : null;
+        SwatchFill.Background = _valid ? SwatchBrush(_model.Argb) : null;
         InvalidMark.Visibility = _valid ? Visibility.Collapsed : Visibility.Visible;
         Toggle.ToolTip = _valid ? $"{_model.Text}: click to pick a colour" : "Not a colour yet: click to pick one, or type #RRGGBB";
     }
@@ -119,7 +119,7 @@ public partial class ColorPickerButton : UserControl
         AlphaGradient.Background = Frozen(new LinearGradientBrush(Color.FromArgb(0, r, g, b), Color.FromRgb(r, g, b), 0));
         Canvas.SetLeft(AlphaThumb, _model.Alpha / 255.0 * AlphaBar.ActualWidth - AlphaThumb.Width / 2);
 
-        PreviewFill.Background = BrushFor(_model.Argb);
+        PreviewFill.Background = SwatchBrush(_model.Argb);
         HexText.Text = _model.Text;
     }
 
@@ -129,10 +129,25 @@ public partial class ColorPickerButton : UserControl
         Canvas.SetTop(e, top);
     }
 
-    private static Brush BrushFor(uint argb)
+    /// <summary>
+    /// A swatch's fill as one brush: an opaque colour plain, a see-through one painted over the checkerboard inside the
+    /// same tiled brush. (A colour layered over a separate checkerboard element lets the squares bleed through its
+    /// anti-aliased edges at fractional display scaling.)
+    /// </summary>
+    private Brush SwatchBrush(uint argb)
     {
         var (a, r, g, b) = ColorText.Split(argb);
-        return Frozen(new SolidColorBrush(Color.FromArgb(a, r, g, b)));
+        var color = Color.FromArgb(a, r, g, b);
+        if (a == 255) return Frozen(new SolidColorBrush(color));
+
+        var checker = (DrawingBrush)Resources["Checker"];
+        var tile = new DrawingGroup();
+        tile.Children.Add(checker.Drawing);
+        tile.Children.Add(new GeometryDrawing(new SolidColorBrush(color), null, new RectangleGeometry(checker.Viewport)));
+        return Frozen(new DrawingBrush(tile)
+        {
+            TileMode = TileMode.Tile, Viewport = checker.Viewport, ViewportUnits = BrushMappingMode.Absolute, Stretch = Stretch.None,
+        });
     }
 
     private static T Frozen<T>(T brush) where T : Freezable

@@ -1,12 +1,17 @@
 <UserControl x:Class="Emberlight.App.Controls.ColorPickerButton"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <!-- Layout rounding keeps the 1 px frames and the colours inside them on whole device pixels; at fractional display
+         scaling (125%, 150%) they would otherwise land between pixels and show thin seams. -->
     <!-- A swatch button that opens a small colour picker under it. Its Text is bound two-way to a colour text box,
          so typing and picking stay in step; the picking logic (HSV, keeping the hue on greys) is ColorPickerModel in
          Core. The checkerboard, gradients and thumb rings are colour content, not UI chrome, so they are fixed
          colours; everything else uses Fluent's theme brushes. -->
     <UserControl.Resources>
-        <!-- Light and dark grey squares, the usual way to show transparency. -->
+        <!-- Light and dark grey squares, the usual way to show transparency. Swatches don't layer a colour over this
+             (the layer underneath bleeds through at anti-aliased edges): SwatchBrush paints a see-through colour and
+             the squares into one brush, and an opaque colour gets no squares at all. -->
         <DrawingBrush x:Key="Checker" TileMode="Tile" Viewport="0,0,8,8" ViewportUnits="Absolute" Stretch="None">
             <DrawingBrush.Drawing>
                 <DrawingGroup>
@@ -23,10 +28,8 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Rim" CornerRadius="4" BorderThickness="1" Background="{StaticResource Checker}"
-                                BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
-                            <Border CornerRadius="3" Background="{TemplateBinding Background}"/>
-                        </Border>
+                        <Border x:Name="Rim" CornerRadius="4" BorderThickness="1" Background="{TemplateBinding Background}"
+                                BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"/>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Rim" Property="BorderBrush" Value="{DynamicResource TextFillColorPrimaryBrush}"/>
@@ -46,14 +49,11 @@
         <ToggleButton x:Name="Toggle" MinHeight="0" MinWidth="0" Padding="6,4" VerticalAlignment="Stretch"
                       AutomationProperties.Name="Pick a colour">
             <StackPanel Orientation="Horizontal">
-                <Border Width="24" Height="14" BorderThickness="1" Background="{StaticResource Checker}"
+                <Border x:Name="SwatchFill" Width="24" Height="14" BorderThickness="1"
                         BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
-                    <Grid>
-                        <Border x:Name="SwatchFill"/>
-                        <!-- shown while the text box holds something that isn't a colour -->
-                        <Path x:Name="InvalidMark" Data="M0,12 L22,0" Stroke="#FFD13438" StrokeThickness="1.5"
-                              Stretch="Fill" Visibility="Collapsed"/>
-                    </Grid>
+                    <!-- shown while the text box holds something that isn't a colour -->
+                    <Path x:Name="InvalidMark" Data="M0,12 L22,0" Stroke="#FFD13438" StrokeThickness="1.5"
+                          Stretch="Fill" Visibility="Collapsed"/>
                 </Border>
                 <Path Data="M0,0 L4,4 L8,0" Margin="6,0,0,0" VerticalAlignment="Center" StrokeThickness="1.2"
                       Stroke="{DynamicResource TextFillColorSecondaryBrush}"/>
@@ -63,7 +63,7 @@
         <Popup x:Name="PickerPopup" PlacementTarget="{Binding ElementName=Toggle}" Placement="Bottom" StaysOpen="False"
                AllowsTransparency="True" PopupAnimation="Fade"
                IsOpen="{Binding IsChecked, ElementName=Toggle, Mode=TwoWay}">
-            <Border Margin="0,4,8,8" Padding="10" CornerRadius="6" BorderThickness="1"
+            <Border Margin="0,4,8,8" Padding="10" CornerRadius="6" BorderThickness="1" UseLayoutRounding="True"
                     Background="{DynamicResource ApplicationBackgroundBrush}"
                     BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
                 <Border.Effect>
@@ -136,10 +136,8 @@
                     </Grid>
 
                     <DockPanel Margin="0,10,0,0">
-                        <Border DockPanel.Dock="Left" Width="32" Height="20" CornerRadius="3" BorderThickness="1"
-                                Background="{StaticResource Checker}" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
-                            <Border x:Name="PreviewFill" CornerRadius="2"/>
-                        </Border>
+                        <Border x:Name="PreviewFill" DockPanel.Dock="Left" Width="32" Height="20" CornerRadius="3"
+                                BorderThickness="1" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"/>
                         <TextBlock x:Name="HexText" Margin="8,0,0,0" VerticalAlignment="Center" FontFamily="Consolas" FontSize="13"/>
                     </DockPanel>
                     <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" FontSize="11"
