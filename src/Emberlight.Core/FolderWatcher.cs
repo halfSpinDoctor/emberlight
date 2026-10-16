@@ -28,6 +28,11 @@ public sealed class FolderWatcher : IDisposable
     public event Action? RootChanged;
     /// <summary>Too many changes for the OS to report individually; the caller should rescan the folder.</summary>
     public event Action? RescanNeeded;
+    /// <summary>
+    /// Folders whose list of subfolders changed (one was created, deleted or renamed in them), so the folder tree
+    /// can re-read them. Each folder is reported once per batch.
+    /// </summary>
+    public event Action<IReadOnlyList<string>>? FoldersChanged;
 
     public string? Path { get; private set; }
     public bool IncludeSubfolders { get; private set; }
@@ -154,6 +159,8 @@ public sealed class FolderWatcher : IDisposable
             RootChanged?.Invoke();
             return;
         }
+        var folders = ChangedFolders(paths, Directory.Exists, p => File.Exists(p) || Directory.Exists(p));
+        if (folders.Count > 0) FoldersChanged?.Invoke(folders);
         // A vanished path with no extension in a recursive watch is probably a whole folder; we can't
         // enumerate what was inside it any more, so ask the caller to rescan instead.
         if (!rescan && IncludeSubfolders)
@@ -177,6 +184,24 @@ public sealed class FolderWatcher : IDisposable
             }
         }
         if (changed.Count > 0 || deleted.Count > 0) FilesChanged?.Invoke(changed, deleted);
+    }
+
+    /// <summary>
+    /// The parent folders of reported paths that are folders now (created, or renamed to), or that have gone and have
+    /// no extension (most likely folders deleted or renamed away; a gone path can't be inspected). Each parent once.
+    /// </summary>
+    internal static List<string> ChangedFolders(IEnumerable<string> paths, Func<string, bool> isDirectory, Func<string, bool> exists)
+    {
+        var parents = new List<string>();
+        var seen = new HashSet<string>(PathUtil.Comparer);
+        foreach (string p in paths)
+        {
+            bool folderNow = isDirectory(p);
+            bool folderGone = !folderNow && !exists(p) && !System.IO.Path.HasExtension(p);
+            if ((folderNow || folderGone) && System.IO.Path.GetDirectoryName(p) is { Length: > 0 } parent && seen.Add(parent))
+                parents.Add(parent);
+        }
+        return parents;
     }
 
     // For vanished paths we can only go by name. The caller treats "deleted" as "drop it if you have it".

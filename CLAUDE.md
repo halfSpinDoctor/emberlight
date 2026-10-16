@@ -76,7 +76,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~347 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~358 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.
@@ -130,13 +130,18 @@ are timing based and could be flaky on a loaded CI machine.
   subfolders on a worker thread (`EnsureChildrenLoadedAsync`); `SelectPathInTree` walks down level by level and stops
   if the user picks another folder meanwhile (`_treeSelectVersion`).
   The top level is built off the UI thread too (`BuildTreeRootsAsync`): each drive's readiness is checked separately
-  and the drive slotted into letter order when it answers, so an offline mapped drive can't stall startup. File > Open
+  and the drive slotted into letter order when it answers, so an offline mapped drive can't stall startup. The drive
+  letters are looked at again every 5 s (`OnDrivePoll`, `FolderTreeRoots.CompareDrives`/`DriveInsertIndex`): new or
+  not-yet-ready letters get a readiness check (so mapped drives appear when a VPN connects), vanished letters are
+  removed. A drive whose letter stays but whose connection drops stays in the tree, as in Explorer. File > Open
   and drag-and-drop still check that the folder exists on the UI thread (the user chose to leave those).
 - **Folder tree:** clicking a folder's name expands it (`OnTreePreviewMouseDown`), and clicking another folder collapses
   the folders earlier clicks opened, except the new folder's parents (`ClickExpandTracker`). Folders opened with the
   arrow or keyboard are never auto-collapsed (using a folder's arrow stops tracking it). Folders the app opens itself
   (startup folder, File > Open, drag and drop, slideshow follow) count as clicked at every level (`OpenAsIfClicked`). Double-click doesn't collapse;
-  keyboard navigation neither auto-expands nor auto-collapses.
+  keyboard navigation neither auto-expands nor auto-collapses. A folder's subfolders are re-read every time it is
+  expanded, and live for the folder on screen (the watcher's `FoldersChanged`) and on F5; the update adds and removes
+  entries in place (`TreeChildren.Compare`), so open folders stay open.
 - **Slideshow `S`:** toggles random for the *running* slideshow only (does not change the saved setting). Off = continue in
   sort order from the current slide; on = current slide first, rest reshuffled. Shows a toast. Quit keys: `Q`, `Esc`, `.`.
 - **Slideshow mouse wheel:** up = previous slide, down = next, one slide per notch (`WheelStepper` adds up touchpad

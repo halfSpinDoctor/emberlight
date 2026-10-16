@@ -395,6 +395,39 @@ internal static class ViewTests
 
         // ---------------------------------------------------------------------------------
         T.Group("FolderWatcher");
+        T.Run("folder changes: created, deleted and renamed folders report their parent once", () =>
+        {
+            string root = Path.Combine(Path.GetTempPath(), "phx-watch"), sub = Path.Combine(root, "sub");
+            var dirs = new HashSet<string>(PathUtil.Comparer) { Path.Combine(root, "new"), Path.Combine(sub, "deeper"), Path.Combine(root, "renamed-to") };
+            var files = new HashSet<string>(PathUtil.Comparer) { Path.Combine(root, "x.jpg") };
+            var changed = FolderWatcher.ChangedFolders(
+                [Path.Combine(root, "new"), Path.Combine(root, "gone"), Path.Combine(root, "x.jpg"), Path.Combine(root, "y.jpg"),
+                 Path.Combine(sub, "deeper"), Path.Combine(root, "renamed-from"), Path.Combine(root, "renamed-to")],
+                dirs.Contains, p => dirs.Contains(p) || files.Contains(p));
+            T.SeqEq(new[] { root, sub }, changed.OrderBy(x => x.Length));
+        });
+        T.Run("folder changes: files alone report no folder", () =>
+        {
+            string root = Path.Combine(Path.GetTempPath(), "phx-watch");
+            T.Eq(0, FolderWatcher.ChangedFolders([Path.Combine(root, "a.jpg"), Path.Combine(root, "gone.png")], _ => false, _ => false).Count);
+        });
+        T.Run("reports a subfolder being created and deleted (for the folder tree)", () =>
+        {
+            using var d = new TempDir();
+            var scanner = new DirectoryScanner(new ImageFileTypes());
+            using var w = new FolderWatcher(scanner.ShouldShowFile, TimeSpan.FromMilliseconds(250));
+            var folders = new List<string>();
+            var got = new ManualResetEventSlim();
+            w.FoldersChanged += f => { lock (folders) folders.AddRange(f); got.Set(); };
+            T.True(w.Watch(d.Path, false));
+            Directory.CreateDirectory(d.File("new folder"));
+            T.True(got.Wait(TimeSpan.FromSeconds(10)), "creating a folder is reported");
+            lock (folders) { T.True(folders.All(f => PathUtil.SamePath(f, Path.GetFullPath(d.Path))), string.Join(", ", folders)); folders.Clear(); }
+            got.Reset();
+            Directory.Delete(d.File("new folder"));
+            T.True(got.Wait(TimeSpan.FromSeconds(10)), "deleting a folder is reported");
+            lock (folders) T.True(folders.Count > 0 && folders.All(f => PathUtil.SamePath(f, Path.GetFullPath(d.Path))));
+        });
         T.Run("reports new, modified and deleted files after the quiet period", () =>
         {
             using var d = new TempDir();

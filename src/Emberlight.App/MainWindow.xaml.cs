@@ -45,6 +45,8 @@ public partial class MainWindow : Window
     private int _treeSelectVersion;      // bumped by each tree walk and user selection; an older walk then stops
     private Task _treeRootsListed = Task.CompletedTask;    // done once the shortcuts are in and drive checks started
     private readonly Dictionary<string, Task> _driveChecks = new(PathUtil.Comparer);   // drive root -> its readiness check
+    private readonly DispatcherTimer _drivePoll = new() { Interval = FolderTreeRoots.DrivePollInterval };   // drives coming and going
+    private bool _drivePollBusy;
 
     public MainWindow(AppSettings settings, string? startPath)
     {
@@ -75,15 +77,17 @@ public partial class MainWindow : Window
         _watcher.FilesChanged += (changed, deleted) => Dispatcher.BeginInvoke(new Action(() => OnWatcherChanged(changed, deleted)));
         _watcher.RootChanged += () => Dispatcher.BeginInvoke(new Action(OnWatcherRootChanged));
         _watcher.RescanNeeded += () => Dispatcher.BeginInvoke(new Action(Rescan));
+        _watcher.FoldersChanged += folders => Dispatcher.BeginInvoke(new Action(() => RefreshTreeFolders(folders)));
         _view.PropertyChanged += OnViewSettingsChanged;
 
         BuildSortMenu();
         SyncMenuState();
 
         _followTimer.Tick += (_, _) => FlushFolderFollow();
+        _drivePoll.Tick += OnDrivePoll;
         Loaded += OnLoaded;
         Closing += OnClosing;
-        Closed += (_, _) => { _watcher.Dispose(); _loader.Dispose(); };
+        Closed += (_, _) => { _drivePoll.Stop(); _watcher.Dispose(); _loader.Dispose(); };
     }
 
     // ===============================================================================================
@@ -138,7 +142,8 @@ public partial class MainWindow : Window
     /// Fills the tree's top level: the \u2605 shortcuts, then the drives in letter order. All file-system checks run on
     /// worker threads. Asking whether a drive is ready can take many seconds (a mapped drive whose server is
     /// offline), so each drive is checked separately and slotted into place as soon as it answers. Returns once the
-    /// shortcuts are in and the drive checks have started (see <see cref="_driveChecks"/>).
+    /// shortcuts are in and the drive checks have started (see <see cref="_driveChecks"/>). From then on the drive
+    /// letters are looked at again every few seconds (<see cref="OnDrivePoll"/>).
     /// </summary>
     private async Task BuildTreeRootsAsync()
     {
@@ -146,33 +151,72 @@ public partial class MainWindow : Window
         _clickExpanded.Clear();
         _driveChecks.Clear();
 
-        var (shortcuts, drives) = await Task.Run(() =>
-        {
-            DriveInfo[] all;
-            try { all = DriveInfo.GetDrives(); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { all = []; }
-            return (FolderTreeRoots.Shortcuts(), all);
-        });
+        var (shortcuts, drives) = await Task.Run(() => (FolderTreeRoots.Shortcuts(), ListDrives()));
 
         foreach (var (path, label) in shortcuts) FolderTree.Items.Add(MakeTreeItem(path, label));
+        foreach (var drive in drives) StartDriveCheck(drive);
+        _drivePoll.Start();
+    }
 
-        int firstDriveIndex = FolderTree.Items.Count;
-        var ready = new bool[drives.Length];
-        for (int i = 0; i < drives.Length; i++)
-            _driveChecks[PathUtil.TrimSeparators(drives[i].RootDirectory.FullName)] = AddDriveWhenReadyAsync(drives[i], i);
+    private static DriveInfo[] ListDrives()
+    {
+        try { return DriveInfo.GetDrives(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
+    }
 
-        async Task AddDriveWhenReadyAsync(DriveInfo drive, int i)
+    private IEnumerable<TreeViewItem> TopItems => FolderTree.Items.OfType<TreeViewItem>();
+
+    /// <summary>The folders of the top-level entries after the shortcuts (drives, then network shares), in tree order.</summary>
+    private List<string> RootsAfterShortcuts()
+        => TopItems.Where(i => !FolderTreeRoots.IsShortcut(i.Header.ToString()!)).Select(i => (string)i.Tag).ToList();
+
+    private List<string> DriveRootsInTree() => RootsAfterShortcuts().Where(r => PathUtil.NetworkShareLabel(r) == null).ToList();
+
+    /// <summary>Checks (on a worker thread) whether a drive is ready, and if so slots it into the tree in letter order.</summary>
+    private void StartDriveCheck(DriveInfo drive)
+        => _driveChecks[PathUtil.TrimSeparators(drive.RootDirectory.FullName)] = AddDriveWhenReadyAsync(drive);
+
+    private async Task AddDriveWhenReadyAsync(DriveInfo drive)
+    {
+        bool isReady = await Task.Run(() =>
         {
-            bool isReady = await Task.Run(() =>
+            try { return drive.IsReady; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+        });
+        string root = drive.RootDirectory.FullName;
+        // Continuations run on the UI thread, so the slot arithmetic can't race with another drive's.
+        if (!isReady || DriveRootsInTree().Any(r => PathUtil.SamePath(r, root))) return;
+        int shortcuts = TopItems.Count(i => FolderTreeRoots.IsShortcut(i.Header.ToString()!));
+        FolderTree.Items.Insert(shortcuts + FolderTreeRoots.DriveInsertIndex(RootsAfterShortcuts(), root), MakeTreeItem(root, drive.Name));
+    }
+
+    /// <summary>
+    /// Every few seconds: adds drives that appeared or became ready (a network drive reconnecting with a VPN, a USB
+    /// stick) and removes drives whose letter has gone. Only new or not-yet-ready letters get the slow readiness check.
+    /// </summary>
+    private async void OnDrivePoll(object? sender, EventArgs e)
+    {
+        if (_drivePollBusy) return;
+        _drivePollBusy = true;
+        try
+        {
+            var drives = await Task.Run(ListDrives);
+            var checking = _driveChecks.Where(kv => !kv.Value.IsCompleted).Select(kv => kv.Key);
+            var update = FolderTreeRoots.CompareDrives(DriveRootsInTree(), checking, drives.Select(d => d.RootDirectory.FullName));
+            foreach (string gone in update.Removed)
             {
-                try { return drive.IsReady; }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
-            });
-            if (!isReady) return;
-            // Continuations run on the UI thread, so the slot arithmetic can't race with another drive's.
-            ready[i] = true;
-            FolderTree.Items.Insert(FolderTreeRoots.DriveSlot(ready, i, firstDriveIndex), MakeTreeItem(drive.RootDirectory.FullName, drive.Name));
+                if (TopItems.FirstOrDefault(i => i.Tag is string t && PathUtil.SamePath(t, gone)) is { } item)
+                {
+                    _clickExpanded.Forget(item);
+                    FolderTree.Items.Remove(item);
+                }
+                _driveChecks.Remove(PathUtil.TrimSeparators(gone));
+            }
+            foreach (string root in update.ToCheck)
+                if (drives.FirstOrDefault(d => PathUtil.SamePath(d.RootDirectory.FullName, root)) is { } drive) StartDriveCheck(drive);
         }
+        catch (Exception ex) { StatusText.Text = ex.Message; }
+        finally { _drivePollBusy = false; }
     }
 
     private TreeViewItem MakeTreeItem(string path, string header)
@@ -188,7 +232,7 @@ public partial class MainWindow : Window
 
     private void OnTreeItemExpanded(object sender, RoutedEventArgs e)
     {
-        if (e.OriginalSource is TreeViewItem item && ReferenceEquals(item, sender)) _ = EnsureChildrenLoadedAsync(item);
+        if (e.OriginalSource is TreeViewItem item && ReferenceEquals(item, sender)) _ = RefreshChildrenAsync(item);
     }
 
     /// <summary>
@@ -214,6 +258,64 @@ public partial class MainWindow : Window
             foreach (var d in dirs) item.Items.Add(MakeTreeItem(d, Path.GetFileName(d)));
         }
         finally { _childLoads.Remove(item); }
+    }
+
+    /// <summary>
+    /// Brings a folder's subfolders up to date: loads them the first time, and after that re-reads the folder and adds
+    /// or removes entries in place (<see cref="TreeChildren"/>), so subfolders already shown keep their open/closed
+    /// state. Runs on every expand, so folders created or deleted elsewhere (in Explorer, say) show up.
+    /// </summary>
+    private Task RefreshChildrenAsync(TreeViewItem item)
+    {
+        if (IsPlaceholder(item)) return EnsureChildrenLoadedAsync(item);
+        if (item.Tag is not string path) return Task.CompletedTask;
+        if (_childLoads.TryGetValue(item, out var running)) return running;
+        var update = UpdateChildrenAsync(item, path);
+        if (!update.IsCompleted) _childLoads[item] = update;
+        return update;
+    }
+
+    private async Task UpdateChildrenAsync(TreeViewItem item, string path)
+    {
+        try
+        {
+            var dirs = await Task.Run(() => FolderNavigator.GetSubfolders(path));
+            var shown = item.Items.OfType<TreeViewItem>().Where(c => c.Tag is string).ToList();
+            var update = TreeChildren.Compare(shown.Select(c => (string)c.Tag).ToList(), dirs);
+            foreach (string gone in update.Removed)
+            {
+                var child = shown.First(c => PathUtil.Comparer.Equals((string)c.Tag, gone));
+                _clickExpanded.Forget(child);
+                item.Items.Remove(child);
+            }
+            foreach (var (index, folder) in update.Inserted) item.Items.Insert(index, MakeTreeItem(folder, Path.GetFileName(folder)));
+        }
+        finally { _childLoads.Remove(item); }
+    }
+
+    /// <summary>
+    /// The watcher saw subfolders come or go in these folders (or F5 was pressed): re-read them wherever the tree has
+    /// them loaded, under a drive or under a \u2605 shortcut. Folders the tree hasn't opened yet read fresh when opened.
+    /// </summary>
+    private void RefreshTreeFolders(IEnumerable<string> folders)
+    {
+        foreach (string folder in folders)
+            foreach (var node in LoadedNodesFor(folder))
+                _ = RefreshChildrenAsync(node);
+    }
+
+    /// <summary>The tree entries for <paramref name="folder"/> whose subfolders are loaded (one per top-level route to it).</summary>
+    private IEnumerable<TreeViewItem> LoadedNodesFor(string folder)
+    {
+        foreach (var top in TopItems)
+        {
+            if (top.Tag is not string topPath || !PathUtil.IsSameOrDescendant(folder, topPath)) continue;
+            var node = top;
+            while (node != null && !PathUtil.SamePath((string)node.Tag, folder))
+                node = IsPlaceholder(node) ? null
+                    : node.Items.OfType<TreeViewItem>().FirstOrDefault(c => c.Tag is string t && PathUtil.IsSameOrDescendant(folder, t));
+            if (node != null && !IsPlaceholder(node)) yield return node;
+        }
     }
 
     /// <summary>Expands the tree down to <paramref name="path"/> (via its drive) and selects it without navigating.</summary>
@@ -508,7 +610,9 @@ public partial class MainWindow : Window
 
     private void Rescan()
     {
-        if (_currentFolder != null) NavigateTo(_currentFolder);
+        if (_currentFolder == null) return;
+        RefreshTreeFolders([_currentFolder]);
+        NavigateTo(_currentFolder);
     }
 
     // ===============================================================================================

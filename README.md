@@ -11,7 +11,7 @@ See `LICENSE-NOTICE.md` (CC BY-NC-SA 2.0) before redistributing.
 |---|---|
 | `src/Emberlight.Core` | Platform-neutral logic, **no dependencies** (net10.0). Everything with real decisions in it. |
 | `src/Emberlight.App` | The WPF application (net10.0-windows): windows, rendering, input. Thin glue over Core. |
-| `tests/Emberlight.Tests` | Dependency-free test runner for Core (347 tests; each one is described in `TESTS.md`). |
+| `tests/Emberlight.Tests` | Dependency-free test runner for Core (358 tests; each one is described in `TESTS.md`). |
 
 ## Build, test, run (Windows, .NET 10 SDK)
 
@@ -58,7 +58,9 @@ Core and the tests also build and run on Linux and macOS; the app itself needs W
 * **Folder tree** - clicking a folder's name expands it, and clicking elsewhere collapses what earlier clicks opened
   (folders opened with the arrow or the keyboard stay open). Folders are read in the background, so a slow disk or
   network share doesn't freeze the window, and a network share without a drive letter (`\\server\share`) gets its own
-  entry when you open a folder on it.
+  entry when you open a folder on it. New and deleted subfolders show up by themselves in the folder on screen, and
+  anywhere else when you open a folder again; drives that connect later (a VPN, a USB stick) appear within a few
+  seconds.
 * **Info panel** - its width can be dragged, like the folder tree's, and is remembered.
 * **Preferences > View** - the View menu's settings (sort order, file names, subfolders, info panel) in one place.
 * **Colour picker** - the slideshow's colour preferences can be typed or picked from a small popup (preset swatches,
@@ -171,7 +173,7 @@ tests on every push and pull request.
 
 ## Verification status
 
-* **Core: tested.** 347 tests (listed in `TESTS.md`), including a fuzz test of the shuffle bookkeeping against a
+* **Core: tested.** 358 tests (listed in `TESTS.md`), including a fuzz test of the shuffle bookkeeping against a
   simple model, pixel-level checks of all eight EXIF orientations against the EXIF spec, parser robustness tests on
   truncated or corrupted data, real file-system tests for sorting, scanning and watching, and animated GIF frame
   composition. Key behaviours are also mutation-checked (the code is deliberately broken to confirm a test fails).

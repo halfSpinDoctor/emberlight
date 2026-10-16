@@ -224,13 +224,88 @@ internal static class FlowTests
             T.True(!FolderTreeRoots.IsShortcut("photos (\\\\nas)"));
         });
 
-        T.Run("drives slot in letter order, after the shortcuts, as each one answers", () =>
+        T.Run("drives slot in letter order, before any network shares, as each one answers", () =>
         {
-            var ready = new bool[4];                      // C, D, E, F
-            ready[2] = true; T.Eq(4, FolderTreeRoots.DriveSlot(ready, 2, firstDriveIndex: 4), "E first: right after the shortcuts");
-            ready[0] = true; T.Eq(4, FolderTreeRoots.DriveSlot(ready, 0, 4), "C goes before E");
-            ready[3] = true; T.Eq(6, FolderTreeRoots.DriveSlot(ready, 3, 4), "F after C and E");
-            ready[1] = true; T.Eq(5, FolderTreeRoots.DriveSlot(ready, 1, 4), "D between C and E");
+            var roots = new List<string>();               // the tree's entries after the shortcuts
+            void AddDrive(string root) => roots.Insert(FolderTreeRoots.DriveInsertIndex(roots, root), root);
+            AddDrive(@"E:\");
+            AddDrive(@"C:\");
+            roots.Add(@"\\nas\photos");                   // a share opened meanwhile: shares go last
+            AddDrive(@"F:\");
+            AddDrive(@"d:\");
+            T.SeqEq(new[] { @"C:\", @"d:\", @"E:\", @"F:\", @"\\nas\photos" }, roots);
+        });
+
+        T.Run("drive checks: new letters are checked, vanished ones removed, checks in progress left alone", () =>
+        {
+            var u = FolderTreeRoots.CompareDrives(inTree: [@"C:\", @"Z:\"], checking: [@"D:\"], present: [@"C:\", @"D:\", @"E:\"]);
+            T.SeqEq(new[] { @"E:\" }, u.ToCheck, "E appeared (D is already being checked)");
+            T.SeqEq(new[] { @"Z:\" }, u.Removed, "Z went away");
+        });
+
+        T.Run("drive checks: a letter that isn't ready yet is checked again on every pass", () =>
+        {
+            // Y: is mapped but offline (VPN down): present, not in the tree, no check running.
+            var u = FolderTreeRoots.CompareDrives(inTree: [@"C:\"], checking: [], present: [@"C:\", @"Y:\"]);
+            T.SeqEq(new[] { @"Y:\" }, u.ToCheck);
+            T.Eq(0, u.Removed.Count);
+        });
+
+        T.Run("drive checks: case and trailing separators don't matter", () =>
+        {
+            var u = FolderTreeRoots.CompareDrives(inTree: ["c:"], checking: ["d:\\"], present: [@"C:\", "D:"]);
+            T.Eq(0, u.ToCheck.Count); T.Eq(0, u.Removed.Count);
+        });
+
+        T.Run("drives are looked for every 5 seconds", () => T.Eq(TimeSpan.FromSeconds(5), FolderTreeRoots.DrivePollInterval));
+
+        T.Group("Folder tree updates");
+        string P(string name) => Path.Combine(Path.GetTempPath(), "phx-tree", name);
+        static List<string> Apply(IReadOnlyList<string> shown, ChildrenUpdate u)
+        {
+            var list = shown.Where(s => !u.Removed.Contains(s, PathUtil.Comparer)).ToList();
+            foreach (var (index, path) in u.Inserted) list.Insert(index, path);
+            return list;
+        }
+
+        T.Run("a new subfolder is inserted where it belongs; existing ones stay put", () =>
+        {
+            string[] shown = [P("2019"), P("2021")], current = [P("2019"), P("2020"), P("2021")];
+            var u = TreeChildren.Compare(shown, current);
+            T.Eq(0, u.Removed.Count);
+            T.SeqEq(new[] { (1, P("2020")) }, u.Inserted);
+            T.SeqEq(current, Apply(shown, u));
+        });
+
+        T.Run("a deleted subfolder is removed; a renamed one is removed and inserted", () =>
+        {
+            string[] shown = [P("a"), P("b"), P("c")], current = [P("a"), P("c2")];
+            var u = TreeChildren.Compare(shown, current);
+            T.SeqEq(new[] { P("b"), P("c") }, u.Removed);
+            T.SeqEq(new[] { (1, P("c2")) }, u.Inserted);
+            T.SeqEq(current, Apply(shown, u));
+        });
+
+        T.Run("no change: nothing to do; a folder with none gets its first", () =>
+        {
+            var same = TreeChildren.Compare([P("a")], [P("a").ToUpperInvariant()]);
+            T.True(same.IsEmpty, "case doesn't make a folder new");
+            var first = TreeChildren.Compare([], [P("new")]);
+            T.SeqEq(new[] { (0, P("new")) }, first.Inserted);
+        });
+
+        T.Run("fuzz: applying the update always gives the folder's current subfolders", () =>
+        {
+            string[] all = Enumerable.Range(0, 12).Select(i => P($"f{i:D2}")).ToArray();
+            for (int seed = 0; seed < 300; seed++)
+            {
+                var rnd = new Random(seed);
+                var shown = all.Where(_ => rnd.Next(2) == 0).ToList();
+                var current = all.Where(_ => rnd.Next(2) == 0).ToList();
+                var u = TreeChildren.Compare(shown, current);
+                T.SeqEq(current, Apply(shown, u), $"seed {seed}");
+                T.True(u.Removed.All(r => !current.Contains(r)), "only vanished folders are removed");
+            }
         });
     }
 

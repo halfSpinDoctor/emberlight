@@ -465,7 +465,13 @@ Copy and move commands in the browser.
   instead of overwriting an existing file. Moving into the file's own folder does nothing.
 
 ### FolderWatcher
-Detects files added, changed or deleted in the open folder (timing based).
+Detects files added, changed or deleted in the open folder (timing based), and subfolders coming and going
+(for the folder tree).
+
+- **folder changes: created, deleted and renamed folders report their parent once**: Worked out from the reported
+  paths; files are ignored, and a gone path counts as a folder only without an extension.
+- **folder changes: files alone report no folder**.
+- **reports a subfolder being created and deleted (for the folder tree)**: Real folders, timing based.
 
 - **reports new, modified and deleted files after the quiet period**: New, changed and deleted images are reported
   once the folder has been quiet briefly, and non-image files are ignored.
@@ -830,8 +836,23 @@ How the app starts from the command line (`StartupArgs.Plan`).
 - **shortcuts: Pictures, Desktop, Documents, Downloads, starred, for the folders that exist**: Missing folders are left
   out.
 - **a starred label marks a shortcut, not a drive**.
-- **drives slot in letter order, after the shortcuts, as each one answers**: Drives answering in any order end up in
-  letter order.
+- **drives slot in letter order, before any network shares, as each one answers**: Drives answering in any order
+  end up in letter order, and shares opened meanwhile stay last.
+- **drive checks: new letters are checked, vanished ones removed, checks in progress left alone**.
+- **drive checks: a letter that isn't ready yet is checked again on every pass**: A mapped drive while the VPN is
+  down shows up once it reconnects.
+- **drive checks: case and trailing separators don't matter**.
+- **drives are looked for every 5 seconds**.
+
+### Folder tree updates
+Bringing a tree folder's subfolders up to date in place (`TreeChildren`), so folders already shown keep their
+open/closed state.
+
+- **a new subfolder is inserted where it belongs; existing ones stay put**.
+- **a deleted subfolder is removed; a renamed one is removed and inserted**.
+- **no change: nothing to do; a folder with none gets its first**: Case differences don't count as changes.
+- **fuzz: applying the update always gives the folder's current subfolders**: 300 seeded random before/after
+  pairs.
 
 ### GifAnimationBuilder
 Putting an animated GIF together from the decoder's frames.
