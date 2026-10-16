@@ -624,6 +624,14 @@ The folders pinned above the folder tree (`PinnedFolders`), with made-up paths: 
 - **pin command text and messages**: Pin or Unpin, depending on whether the folder is pinned.
 - **pins are saved with the settings, cleaned on load**: A round trip keeps them in order; blanks, nulls and repeats in
   a hand-edited file are dropped; a null list loads as empty; nothing is pinned at first.
+- **a pin's own name replaces its label; blank goes back to the folder's name**: Any spelling of the path works,
+  spaces at the ends are dropped, setting the same name or naming an unpinned folder changes nothing.
+- **named pins keep their name exactly and drop out of the same-name comparison**: The one unnamed `2024` left needs
+  no parent, and a chosen name is shown as given even when it matches another label.
+- **the Rename Pin dialog: unchanged text changes nothing**: OK on the automatic label doesn't fix it as a name; a new
+  name is used; emptying it goes back to the automatic label.
+- **names follow their pin when moved, go when it is unpinned, and are saved**: Pinning again starts without a name;
+  names of unpinned folders and blank names are dropped on load; a settings file from before names loads.
 
 ### Thumbnail sizes
 - **cell widths are whole numbers within the allowed range**: Rounding and both limits.

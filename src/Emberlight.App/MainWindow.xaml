@@ -35,11 +35,12 @@
         </ContextMenu>
 
         <!-- Right-click on a pinned folder. An exception to the menu-bar rule (decided with the user): managing pins
-             happens where the pins are, so Move Up / Move Down live only here. -->
+             happens where the pins are, so Rename Pin and Move Up / Move Down live only here. -->
         <ContextMenu x:Key="PinContextMenu" FontSize="12" Opened="OnPinContextMenuOpened">
             <ContextMenu.Resources>
                 <Style TargetType="MenuItem" BasedOn="{StaticResource CompactMenuItem}"/>
             </ContextMenu.Resources>
+            <MenuItem Header="_Rename Pin..." InputGestureText="F2" Click="OnContextRenamePin"/>
             <MenuItem Header="_Unpin Folder" Click="OnContextTogglePin"/>
             <Separator/>
             <MenuItem Tag="Up" Header="Move _Up" Click="OnPinMoveUp"/>
@@ -214,7 +215,8 @@
                 <ListBox x:Name="PinList" Grid.Row="0" Visibility="Collapsed" MaxHeight="142" Padding="0,2"
                          BorderThickness="0,0,1,0" BorderBrush="{Binding BorderBrush, ElementName=FolderTree}"
                          Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                         SelectionChanged="OnPinSelected" PreviewMouseRightButtonDown="OnPinRightButtonDown">
+                         SelectionChanged="OnPinSelected" PreviewMouseRightButtonDown="OnPinRightButtonDown"
+                         PreviewKeyDown="OnPinKeyDown">
                     <ListBox.Resources>
                         <!-- Compact rows matching the tree's 12 px text and 22 px rows (Fluent's list items are taller). -->
                         <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">

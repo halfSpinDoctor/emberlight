@@ -63,7 +63,8 @@ Core and the tests also build and run on Linux and macOS; the app itself needs W
   seconds.
 * **Pinned folders** - pin folders you go back to often (File > Pinned Folders > Pin Current Folder, or right-click a
   folder in the tree). They're listed above the folder tree, which appears only once something is pinned, and in File >
-  Pinned Folders; `Ctrl+1` to `Ctrl+9` open the first nine. Right-click a pin to unpin it or move it up or down.
+  Pinned Folders; `Ctrl+1` to `Ctrl+9` open the first nine. Right-click a pin to rename it (`F2`; the name is
+  only for the pin, the folder isn't renamed), unpin it, or move it up or down.
   Pins are remembered between sessions.
 * **Right-click menu on thumbnails** - Copy To, Move To, Rename and Move to Recycle Bin (the same commands as the
   File menu).

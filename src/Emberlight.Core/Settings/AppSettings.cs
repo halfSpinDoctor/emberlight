@@ -72,6 +72,8 @@ public sealed class AppSettings
     public List<string> IgnoredFileTypes { get; set; } = new();
     /// <summary>The folders pinned above the folder tree, top to bottom (see <see cref="PinnedFolders"/>).</summary>
     public List<string> PinnedFolders { get; set; } = new();
+    /// <summary>The names the user gave pinned folders (Rename Pin), keyed by path; pins not listed use their folder's name.</summary>
+    public Dictionary<string, string> PinnedFolderNames { get; set; } = new();
 
     [JsonIgnore]
     public SortOrder SortOrder
@@ -97,7 +99,10 @@ public sealed class AppSettings
         SlideshowInfoMode = Math.Clamp(SlideshowInfoMode, 0, 2);
         if (!Enum.IsDefined(IncludeSubfoldersMode)) IncludeSubfoldersMode = SubfolderMode.ResetOnNewTree;
         IgnoredFileTypes ??= new();
-        PinnedFolders = new PinnedFolders(PinnedFolders).Paths.ToList();   // drops nulls, blanks and repeats
+        // Drops nulls, blanks and repeats, and names of folders that aren't pinned (or blank names).
+        var pins = new PinnedFolders(PinnedFolders, PinnedFolderNames);
+        PinnedFolders = pins.Paths.ToList();
+        PinnedFolderNames = pins.Names.ToDictionary();
         PicturesFolderPath ??= "";
         LastFolderPath ??= "";
         SlideshowBackgroundColor ??= "#000000";

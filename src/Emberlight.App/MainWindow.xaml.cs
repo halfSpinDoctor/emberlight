@@ -64,7 +64,7 @@ public partial class MainWindow : Window
         _scanner = new DirectoryScanner(_types);
         _listing = new FileListing<ThumbnailItem>(_items, p => new ThumbnailItem(p), i => i.Path, settings.SortOrder, _items.ReplaceAll);
         _subfolders = new SubfolderScope(settings);
-        _pins = new PinnedFolders(settings.PinnedFolders);
+        _pins = new PinnedFolders(settings.PinnedFolders, settings.PinnedFolderNames);
 
         _view.CellWidth = settings.ThumbCellWidth;
         _view.ShowFilenames = settings.ShowFilenames;
@@ -140,6 +140,7 @@ public partial class MainWindow : Window
         if (InfoPanel.Visibility == Visibility.Visible && InfoColumn.ActualWidth > 0) _settings.InfoPanelWidth = InfoColumn.ActualWidth;
         _settings.IgnoredFileTypes = _types.DisabledExtensions.ToList();
         _settings.PinnedFolders = _pins.Paths.ToList();
+        _settings.PinnedFolderNames = _pins.Names.ToDictionary();
     }
 
     // ===============================================================================================
@@ -1188,6 +1189,29 @@ public partial class MainWindow : Window
     private void OnContextTogglePin(object sender, RoutedEventArgs e)
     {
         if (_contextFolder != null) TogglePin(_contextFolder);
+    }
+
+    private void OnContextRenamePin(object sender, RoutedEventArgs e)
+    {
+        if (_contextFolder != null) RenamePin(_contextFolder);
+    }
+
+    /// <summary>F2 in the pin list renames the highlighted pin (the folder on screen), as F2 in the grid renames a file.</summary>
+    private void OnPinKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.F2 || Keyboard.Modifiers != ModifierKeys.None) return;
+        if (PinList.SelectedItem is ListBoxItem { Tag: string path }) RenamePin(path);
+        e.Handled = true;
+    }
+
+    /// <summary>Gives a pin a name of its own (or takes it away) through <see cref="PinNameWindow"/>.</summary>
+    private void RenamePin(string path)
+    {
+        int index = _pins.IndexOf(path);
+        if (index < 0) return;
+        string shown = _pins.Labels()[index];
+        var dlg = new PinNameWindow(_pins.Paths[index], shown) { Owner = this };
+        if (dlg.ShowDialog() == true && _pins.Rename(path, dlg.NewName, shown)) PinsChanged();
     }
 
     private void OnPinMoveUp(object sender, RoutedEventArgs e) => MovePin(-1);

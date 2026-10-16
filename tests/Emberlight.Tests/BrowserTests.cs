@@ -127,6 +127,64 @@ internal static class BrowserTests
             T.Eq(0, SettingsStore.Load(d.File("none.json")).PinnedFolders.Count);
             T.Eq(0, new AppSettings().PinnedFolders.Count, "nothing pinned at first");
         });
+
+        T.Run("a pin's own name replaces its label; blank goes back to the folder's name", () =>
+        {
+            var pins = new PinnedFolders(new[] { Root("Holidays", "2024"), Root("Scans") });
+            T.True(pins.SetName(Root("Holidays", "2024") + Path.DirectorySeparatorChar, "  Mum's camera  "), "any spelling of the path");
+            T.Eq("Mum's camera", pins.CustomName(Root("Holidays", "2024")), "spaces at the ends dropped");
+            T.SeqEq(new[] { "Mum's camera", "Scans" }, pins.Labels());
+            T.True(!pins.SetName(Root("Holidays", "2024"), "Mum's camera"), "same name: nothing changed");
+            T.True(!pins.SetName(Root("Other"), "x"), "not pinned");
+            T.True(pins.SetName(Root("Holidays", "2024"), "   "));
+            T.Eq(null, pins.CustomName(Root("Holidays", "2024")));
+            T.SeqEq(new[] { "2024", "Scans" }, pins.Labels());
+            T.True(!pins.SetName(Root("Scans"), null), "no name to clear");
+        });
+
+        T.Run("named pins keep their name exactly and drop out of the same-name comparison", () =>
+        {
+            var pins = new PinnedFolders(new[] { Root("Holidays", "2024"), Root("Work", "2024"), Root("Home", "2024") });
+            T.SeqEq(new[] { "2024 (Holidays)", "2024 (Work)", "2024 (Home)" }, pins.Labels());
+            pins.SetName(Root("Work", "2024"), "Work");
+            pins.SetName(Root("Home", "2024"), "2024");
+            T.SeqEq(new[] { "2024", "Work", "2024" }, pins.Labels(),
+                "the one unnamed 2024 needs no parent; a name the user chose is shown as given, even if it matches");
+        });
+
+        T.Run("the Rename Pin dialog: unchanged text changes nothing", () =>
+        {
+            var pins = new PinnedFolders(new[] { Root("a", "2024"), Root("b", "2024") });
+            T.True(!pins.Rename(Root("a", "2024"), "2024 (a) ", "2024 (a)"), "OK on the automatic label doesn't fix it as a name");
+            T.Eq(null, pins.CustomName(Root("a", "2024")));
+            T.True(pins.Rename(Root("a", "2024"), "Trip", "2024 (a)"));
+            T.Eq("Trip", pins.Labels()[0]);
+            T.True(pins.Rename(Root("a", "2024"), "", "Trip"), "emptied: back to automatic");
+            T.Eq("2024 (a)", pins.Labels()[0]);
+        });
+
+        T.Run("names follow their pin when moved, go when it is unpinned, and are saved", () =>
+        {
+            var pins = new PinnedFolders(new[] { Root("a"), Root("b") });
+            pins.SetName(Root("b"), "Bee");
+            pins.Move(Root("b"), -1);
+            T.SeqEq(new[] { "Bee", "a" }, pins.Labels());
+            pins.Unpin(Root("b"));
+            pins.Pin(Root("b"));
+            T.Eq(null, pins.CustomName(Root("b")), "pinned again: starts with its folder's name");
+
+            using var d = new TempDir();
+            var s = new AppSettings { PinnedFolders = [Root("a"), Root("b")] };
+            s.PinnedFolderNames[Root("a")] = "Ay";
+            s.PinnedFolderNames[Root("gone")] = "Not pinned";
+            s.PinnedFolderNames[Root("b")] = " ";
+            T.True(SettingsStore.Save(s, d.File("s.json")));
+            var loaded = SettingsStore.Load(d.File("s.json"));
+            T.SeqEq(new[] { Root("a") }, loaded.PinnedFolderNames.Keys, "names of unpinned folders and blank names dropped");
+            T.SeqEq(new[] { "Ay", "b" }, new PinnedFolders(loaded.PinnedFolders, loaded.PinnedFolderNames).Labels());
+            File.WriteAllText(d.File("old.json"), "{ \"PinnedFolders\": [] }");
+            T.Eq(0, SettingsStore.Load(d.File("old.json")).PinnedFolderNames.Count, "a settings file from before names loads");
+        });
     }
 
     static void ImageInfoTests()

@@ -71,7 +71,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~375 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~379 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.
@@ -85,7 +85,8 @@ are timing based and could be flaky on a loaded CI machine.
   themselves can show up when they do: the pinned-folder list exists only while a folder is pinned.
 - **Right-click menus only contain items that are also in the menu bar**, with the same names, shortcuts and
   handlers. A right-click menu is a shortcut to existing commands, never a place for new ones.
-  **Exceptions (agreed with the user): managing pins.** A pin's right-click menu has Move Up / Move Down (only there),
+  **Exceptions (agreed with the user): managing pins.** A pin's right-click menu has Rename Pin and Move Up / Move
+  Down (only there),
   and the folder tree's right-click menu has Pin Folder / Unpin Folder, which works on the folder clicked rather than
   the folder on screen like File > Pinned Folders > Pin Current Folder. Don't add others without asking.
 
@@ -99,7 +100,13 @@ are timing based and could be flaky on a loaded CI machine.
   drag and drop). Pin with File > Pinned Folders > Pin Current Folder, or the tree's right-click Pin Folder; unpin
   with the same commands or the pin's right-click Unpin Folder. File > Pinned Folders lists every pin, which is how the
   Ctrl+1 to Ctrl+9 shortcuts (first nine pins) are shown; the pin tooltips show path and shortcut. Labels are the folder
-  name, plus the parent's name when two pins share a name. Nothing checks pins at startup (an offline drive could
+  name, plus the parent's name when two pins share a name (the full path if that still matches).
+  **Rename Pin** (pin's right-click menu, or F2 in the pin list for the highlighted pin; `PinNameWindow`) gives a pin
+  its own name, which replaces the label entirely and is shown exactly as typed (the user chose this over a note in
+  [ ] after the name). Named pins are left out of the same-name comparison. Emptying the name goes back to the
+  automatic label; clicking OK on the unchanged text changes nothing. Names are saved in
+  `AppSettings.PinnedFolderNames` (path -> name, beside the plain path list, so older settings files still load) and
+  are dropped when the pin is unpinned. Nothing checks pins at startup (an offline drive could
   stall the window); a pin is looked for on a worker thread when opened, and a missing one gives a status-bar message
   and stays pinned.
 - **Thumbnail right-click menu** (`ThumbContextMenu` in `MainWindow.xaml`, set on each grid cell by
