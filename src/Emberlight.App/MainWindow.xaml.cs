@@ -914,7 +914,7 @@ public partial class MainWindow : Window
     {
         var sel = SelectedItems();
         if (sel.Count == 0) return;
-        if (FileDeletion.NeedsConfirmation(sel.Count) && MessageBox.Show(this, FileDeletion.ConfirmationText(sel.Count), "Emberlight",
+        if (MessageBox.Show(this, FileDeletion.ConfirmationText(sel.Select(i => i.Path).ToList()), "Emberlight",
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
 
         int index = ThumbList.SelectedIndex;

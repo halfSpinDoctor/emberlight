@@ -678,7 +678,8 @@ The browser's lossless Rotate Left/Right and Reset Orientation commands.
 ### FileDeletion
 The browser's Delete command, with a fake Recycle Bin.
 
-- **more than 10 files asks first**: 10 doesn't, 11 does, and the question's wording.
+- **every delete asks first, naming the file when there is one**: The exact question for one file, the count for
+  several, and no question when there is nothing to delete.
 - **deletes each file, reports each one that went, and keeps the first error**: Every file is tried in order; the
   failure line names the count and the first error, and there is none when everything went.
 - **afterwards the item at the old position is selected, or the last one**: And nothing when the list is empty.

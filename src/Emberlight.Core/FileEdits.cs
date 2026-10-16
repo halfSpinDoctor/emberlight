@@ -57,12 +57,16 @@ public sealed record DeleteResult(IReadOnlyList<string> Deleted, int Failed, str
 /// <summary>The browser's Delete command: when to ask first, the deleting itself, and what is selected afterwards.</summary>
 public static class FileDeletion
 {
-    /// <summary>Deleting more files than this asks for confirmation first.</summary>
-    public const int ConfirmAbove = 10;
-
-    public static bool NeedsConfirmation(int count) => count > ConfirmAbove;
-
-    public static string ConfirmationText(int count) => $"Move {count} files to the Recycle Bin?";
+    /// <summary>
+    /// The question asked before every delete (Yes/No): the file's name when there is one, otherwise how many.
+    /// Null when there is nothing to delete.
+    /// </summary>
+    public static string? ConfirmationText(IReadOnlyList<string> paths) => paths.Count switch
+    {
+        0 => null,
+        1 => $"Are you sure you want to send \"{Path.GetFileName(paths[0])}\" to the Recycle Bin?",
+        _ => $"Are you sure you want to send these {paths.Count} files to the Recycle Bin?",
+    };
 
     /// <summary>Deletes each file in turn; <paramref name="deleted"/> runs for each one that went.</summary>
     public static DeleteResult Delete(IEnumerable<string> paths, IRecycleBin bin, Action<string>? deleted = null)

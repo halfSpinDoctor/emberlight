@@ -637,9 +637,18 @@ public partial class SlideshowWindow : Window
     private void DeleteCurrent()
     {
         if (_state.CurrentFile is not { } path) return;
+        // Hold auto-advance while asking, so the slide being asked about stays on screen.
+        _timer.Stop();
+        if (MessageBox.Show(this, FileDeletion.ConfirmationText([path]), "Emberlight",
+                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        {
+            RestartTimer();
+            return;
+        }
         if (!RecycleBin.Instance.TryDelete(path, out string? error))
         {
             ShowMessage(DisplayText.RecycleFailed(error));
+            RestartTimer();
             return;
         }
         _cache.Remove(path);

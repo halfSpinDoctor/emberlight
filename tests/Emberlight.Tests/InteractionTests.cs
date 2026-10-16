@@ -520,11 +520,16 @@ internal static class InteractionTests
     {
         T.Group("FileDeletion");
 
-        T.Run("more than 10 files asks first", () =>
+        T.Run("every delete asks first, naming the file when there is one", () =>
         {
-            T.True(!FileDeletion.NeedsConfirmation(1)); T.True(!FileDeletion.NeedsConfirmation(10));
-            T.True(FileDeletion.NeedsConfirmation(11));
-            T.Eq("Move 11 files to the Recycle Bin?", FileDeletion.ConfirmationText(11));
+            string dir = Path.Combine(Path.GetTempPath(), "phx-del");
+            T.Eq("Are you sure you want to send \"beach.jpg\" to the Recycle Bin?",
+                FileDeletion.ConfirmationText([Path.Combine(dir, "beach.jpg")]));
+            T.Eq("Are you sure you want to send these 3 files to the Recycle Bin?",
+                FileDeletion.ConfirmationText([Path.Combine(dir, "a.jpg"), Path.Combine(dir, "b.jpg"), Path.Combine(dir, "c.jpg")]));
+            T.Eq("Are you sure you want to send these 2 files to the Recycle Bin?",
+                FileDeletion.ConfirmationText([Path.Combine(dir, "a.jpg"), Path.Combine(dir, "b.jpg")]));
+            T.Eq(null, FileDeletion.ConfirmationText([]), "nothing to delete, nothing to ask");
         });
 
         T.Run("deletes each file, reports each one that went, and keeps the first error", () =>

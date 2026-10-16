@@ -149,6 +149,10 @@ are timing based and could be flaky on a loaded CI machine.
   solid `ApplicationBackgroundBrush` rather than Fluent's translucent Mica (wallpaper tint would skew photos). The
   slideshow window stays black by design.
 - "Rotate" in the browser edits the EXIF orientation tag only (lossless); there is no pixel rotation.
+- **Deleting asks first, every time** (browser Delete key and menu, and the slideshow's Delete key), Yes/No, in the
+  user's wording: `Are you sure you want to send "<filename>" to the Recycle Bin?`; several files: "these N files"
+  (`FileDeletion.ConfirmationText`). This replaced asking only above 10 files. The slideshow holds auto-advance while
+  asking.
 - **Move To:** read-only files move like any other (as in Explorer; the user chose to keep it). Moving files into the
   folder they are already in leaves them where they are and in the grid ("N already in that folder").
 
