@@ -11,4 +11,5 @@ FolderNavigatorTests.RunAll();
 BrowserTests.RunAll();
 InteractionTests.RunAll();
 ColorTests.RunAll();
+CommandTests.RunAll();
 return T.Summary();

@@ -19,30 +19,38 @@ namespace Emberlight.App;
 /// </summary>
 public partial class SlideshowWindow : Window
 {
-    private const string HelpContent =
-        "Slideshow keys\n" +
-        "\n" +
-        "Right  Down  Space       next slide\n" +
-        "Left   Up    Shift+Space previous slide\n" +
-        "Alt+Right / Alt+Left     next / previous in original order (shuffled show)\n" +
-        "Home  End                first / last slide\n" +
-        "Ctrl+Right  Ctrl+Left    next / previous folder (same level; skips empty folders)\n" +
-        "PageUp  PageDown         back / forward 10 slides\n" +
-        "\n" +
-        "1-9                      auto-advance every N seconds     0  stop\n" +
-        "Shift+1  Shift+2         auto-advance every 0.5 / 1.5 seconds\n" +
-        "Space                    pause auto-advance\n" +
-        "\n" +
-        "+  -                     zoom in / out     =  actual size     *  reset\n" +
-        "L  R                     rotate left / right     F  flip\n" +
-        "Keypad 1-9               pan around when zoomed in\n" +
-        "\n" +
-        "I                        cycle file info / EXIF / none\n" +
-        "Shift+I                  more EXIF        P  show full path\n" +
-        "Delete                   move current file to the Recycle Bin\n" +
-        "S                        random order on / off (reshuffles when turned on)\n" +
-        "H  ?                     this help        Q  Esc  .  quit\n" +
-        "\n" +
+    /// <summary>
+    /// The key names for the help screen (H), on a US keyboard. What each line says is <see cref="SlideshowHelp"/>
+    /// (Core); keep these in step with <see cref="MapKey"/>. A topic missing here shows "?" on the help screen.
+    /// </summary>
+    private static readonly Dictionary<SlideshowHelpTopic, string> HelpKeys = new()
+    {
+        [SlideshowHelpTopic.Next] = "Right  Down  Space",
+        [SlideshowHelpTopic.Previous] = "Left  Up  Shift+Space",
+        [SlideshowHelpTopic.InOrder] = "Alt+Right  Alt+Left",
+        [SlideshowHelpTopic.FirstLast] = "Home  End",
+        [SlideshowHelpTopic.Folders] = "Ctrl+Right  Ctrl+Left",
+        [SlideshowHelpTopic.Pages] = "PageUp  PageDown",
+        [SlideshowHelpTopic.Timer] = "1-9",
+        [SlideshowHelpTopic.StopTimer] = "0",
+        [SlideshowHelpTopic.QuickTimer] = "Shift+1  Shift+2",
+        [SlideshowHelpTopic.Pause] = "Space",
+        [SlideshowHelpTopic.Zoom] = "+  -",
+        [SlideshowHelpTopic.ActualSize] = "=",
+        [SlideshowHelpTopic.ResetView] = "*",
+        [SlideshowHelpTopic.Rotate] = "L  R",
+        [SlideshowHelpTopic.Flip] = "F",
+        [SlideshowHelpTopic.Pan] = "Keypad 1-9",
+        [SlideshowHelpTopic.Info] = "I",
+        [SlideshowHelpTopic.MoreExif] = "Shift+I",
+        [SlideshowHelpTopic.Path] = "P",
+        [SlideshowHelpTopic.Delete] = "Delete",
+        [SlideshowHelpTopic.Random] = "S",
+        [SlideshowHelpTopic.Help] = "H  ?",
+        [SlideshowHelpTopic.Quit] = "Q  Esc  .",
+    };
+
+    private const string MouseHelp =
         "Mouse: click = next, double-click = quit, wheel = previous / next,\n" +
         "       Ctrl+wheel = zoom, drag or wheel = pan when zoomed";
 
@@ -55,13 +63,9 @@ public partial class SlideshowWindow : Window
     private readonly HashSet<string> _preloading = new(PathUtil.Comparer);
     private readonly object _preloadLock = new();
     private readonly bool _fullScreen;
-    private readonly DirectoryScanner _scanner;
-    private readonly SortOrder _sortOrder;
-    private readonly bool _includeSubfolders;
+    private readonly FolderJumper _jumper;           // Ctrl+Right / Ctrl+Left
     private readonly DispatcherTimer _toastTimer = new();
 
-    private string? _jumpAnchor;       // folder we started in / last jumped to; the reference for Ctrl+Left/Right while the slide is inside it
-    private bool _folderJumpBusy;
     private bool _closed;
 
     private LoadedImage? _current;
@@ -87,17 +91,14 @@ public partial class SlideshowWindow : Window
         _settings = settings;
         _overlay = new SlideshowOverlay(settings);
         _fullScreen = fullScreen;
-        _sortOrder = sortOrder;
-        _scanner = scanner;
-        _includeSubfolders = includeSubfolders;
-        _jumpAnchor = !string.IsNullOrWhiteSpace(startFolder) && Directory.Exists(startFolder) ? startFolder : null;
+        _jumper = new FolderJumper(startFolder, scanner, sortOrder, includeSubfolders);
         _toastTimer.Tick += (_, _) => { _toastTimer.Stop(); ToastPanel.Visibility = Visibility.Collapsed; };
 
         Background = BrushHelper.FromString(settings.SlideshowBackgroundColor, Brushes.Black);
         Viewer.ImageBackground = BrushHelper.FromString(settings.TransparentImageBackgroundColor, null);
         Viewer.ScaleUp = settings.SlideshowScaleUp;
         Viewer.ActualSize = settings.SlideshowActualSize;
-        HelpText.Text = HelpContent;
+        HelpText.Text = SlideshowHelp.Build(HelpKeys, MouseHelp);
 
         _state = new SlideshowState
         {
@@ -388,7 +389,7 @@ public partial class SlideshowWindow : Window
         return true;
     }
 
-    /// <summary>The slideshow's keys (US layout; see <see cref="HelpContent"/>). None for keys it doesn't use.</summary>
+    /// <summary>The slideshow's keys (US layout; see <see cref="HelpKeys"/>). None for keys it doesn't use.</summary>
     private SlideshowInput MapKey(Key key, ModifierKeys mods)
     {
         bool shift = (mods & ModifierKeys.Shift) != 0;
@@ -588,59 +589,22 @@ public partial class SlideshowWindow : Window
     // ============================================================================================
 
     /// <summary>
-    /// The folder that "next/previous folder" is relative to: the folder the slideshow started from (or last
-    /// jumped to) while the slide on screen is inside it, otherwise the slide's own folder. See
-    /// <see cref="FolderNavigator.ResolveReferenceFolder"/>.
+    /// Ctrl+Right / Ctrl+Left: loads the next or previous folder with images (<see cref="FolderJumper"/> decides which,
+    /// and what to say). Key repeat while a folder is still loading is ignored.
     /// </summary>
-    private string? CurrentFolderForJump()
-    {
-        string? folder = FolderNavigator.ResolveReferenceFolder(_jumpAnchor, _state.CurrentFile ?? LastShownPath, out var anchor);
-        _jumpAnchor = anchor;
-        return folder;
-    }
-
     private async Task JumpToSiblingFolderAsync(int direction)
     {
-        if (_folderJumpBusy || _closed) return;        // ignore key repeat while a folder is still loading
-        string? folder = CurrentFolderForJump();
-        if (folder == null) { SystemSounds.Beep.Play(); return; }
-
-        _folderJumpBusy = true;
-        ShowToast(direction > 0 ? "Next folder\u2026" : "Previous folder\u2026", 10);
-
-        var scanner = _scanner;
-        var order = _sortOrder;
-        bool subfolders = _includeSubfolders;
-        SiblingFolder? target = null;
-        bool failed = false;
-        try
-        {
-            // Listing and sorting a big folder can take a moment, so keep it off the UI thread. The comparer is
-            // created here (with its own metadata cache) rather than shared with the browser window.
-            target = await Task.Run(() => FolderNavigator.FindSibling(folder, direction, scanner, FileComparers.For(order), subfolders));
-        }
-        catch (Exception)
-        {
-            failed = true;
-        }
-        finally
-        {
-            _folderJumpBusy = false;
-        }
         if (_closed) return;
-
-        if (target == null)
+        var result = await _jumper.JumpAsync(direction, _state.CurrentFile ?? LastShownPath, text => ShowToast(text, 10));
+        if (_closed || result.Outcome == FolderJumpOutcome.Busy) return;
+        if (result.ShouldBeep) SystemSounds.Beep.Play();
+        if (result.Target is { } target)
         {
-            SystemSounds.Beep.Play();
-            ShowToast(failed ? "Couldn't read that folder" : direction > 0 ? "No next folder" : "No previous folder");
-            return;
+            // Keep a shuffled slideshow shuffled; the new folder starts on its first image and is then shuffled.
+            _state.Load(target.Files, 0, _state.RandomMode);     // raises CurrentChanged -> shows the first slide
+            FolderJumped?.Invoke(target.Path);
         }
-
-        _jumpAnchor = target.Path;
-        // Keep a shuffled slideshow shuffled; the new folder starts on its first image and is then shuffled.
-        _state.Load(target.Files, 0, _state.RandomMode);     // raises CurrentChanged -> shows the first slide
-        ShowToast($"{Path.GetFileName(target.Path)}   ({target.Position} of {target.Total})");
-        FolderJumped?.Invoke(target.Path);
+        if (result.Message is { } message) ShowToast(message);
     }
 
     /// <summary>

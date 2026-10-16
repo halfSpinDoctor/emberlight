@@ -745,3 +745,41 @@ The state behind the Preferences colour picker.
   square's full-strength hue.
 - **presets: all valid, all different, and include black, white and transparent**: And they are written the way the
   picker writes colours.
+
+
+---
+
+## CommandTests.cs
+
+### Browser commands
+The browser's keys as commands (`BrowserCommand`); the Windows key bindings are in `MainWindow`.
+
+- **moving in the grid needs something in the grid; everything else always runs**: Grid moves on an empty grid are
+  left to the list itself; every other command runs; None never does.
+- **an input carries its grid direction**: And the default input is None.
+
+### Key help
+The slideshow help screen (`KeyHelp`, `SlideshowHelp`); the Windows key names are in `SlideshowWindow.HelpKeys`.
+
+- **keys and descriptions line up in two columns, sections apart, footer last**: The exact layout.
+- **no footer, and an empty section, add nothing**.
+- **every slideshow command is described by some help topic**: A new command can't go undocumented.
+- **topics are listed once each, and each has a description**.
+- **the page size in the help follows the command's page size**: "back / forward 10 slides" comes from `PageSize`.
+- **building the help uses the platform's key names, in topic order**: Title first, footer last, every description in.
+- **a topic without key names shows a question mark instead of failing**.
+
+### FolderJumper
+Ctrl+Right / Ctrl+Left in the slideshow. The tests use a folder tree with siblings 1, 2 (no images) and 3.
+
+- **next folder: skips folders without images, reports where it is, and becomes the reference**: Including the
+  "Next folder…" note while searching and the "3   (3 of 3)" message.
+- **previous folder from there goes back past the empty folder**.
+- **at the end: a beep and 'No next folder' / 'No previous folder', reference kept**.
+- **a slide outside the reference folder makes its own folder the reference**.
+- **a start folder that no longer exists is not used as the reference**.
+- **nothing to go by: a beep, no search and no message**.
+- **a folder that can't be read: a beep and 'Couldn't read that folder'**: And the jumper isn't left busy.
+- **key repeat while a folder is still loading is ignored**: Silently, with a time limit so a regression fails
+  instead of hanging the test run.
+- **with subfolders on, a folder whose images are all in subfolders counts**.

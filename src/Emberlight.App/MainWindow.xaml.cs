@@ -799,42 +799,98 @@ public partial class MainWindow : Window
     // Keyboard
     // ===============================================================================================
 
+    /// <summary>Keys for the thumbnail grid itself (only while it has focus): Delete and moving the selection.</summary>
     private void OnThumbKeyDown(object sender, KeyEventArgs e)
     {
-        bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
-        bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
-        switch (e.Key)
+        if (RunIfApplicable(MapGridKey(e.Key, Keyboard.Modifiers))) e.Handled = true;
+    }
+
+    /// <summary>Window-wide keys, so they work wherever the focus is (Enter works with nothing selected, for instance).</summary>
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        base.OnPreviewKeyDown(e);
+        if (e.Handled) return;
+        if (RunIfApplicable(MapWindowKey(e.Key, Keyboard.Modifiers))) e.Handled = true;
+    }
+
+    private bool RunIfApplicable(BrowserInput input)
+    {
+        if (!BrowserCommands.CanRun(input, _items.Count)) return false;
+        Execute(input);
+        return true;
+    }
+
+    /// <summary>The grid's keys. Arrows, Page Up/Down, Home and End move by item index and row arithmetic rather than
+    /// by the containers on screen: in a virtualized grid most items have no container to move focus between.</summary>
+    private static BrowserInput MapGridKey(Key key, ModifierKeys mods)
+    {
+        if (key == Key.Delete) return new(BrowserCommand.Delete);
+        if ((mods & (ModifierKeys.Shift | ModifierKeys.Control)) != 0) return default;   // leave extend-selection keys to the list
+        return key switch
         {
-            case Key.Delete:
-                OnDelete(sender, e);
-                e.Handled = true;
+            Key.Left => new(BrowserCommand.MoveSelection, GridMove.Left),
+            Key.Right => new(BrowserCommand.MoveSelection, GridMove.Right),
+            Key.Up => new(BrowserCommand.MoveSelection, GridMove.Up),
+            Key.Down => new(BrowserCommand.MoveSelection, GridMove.Down),
+            Key.PageUp => new(BrowserCommand.MoveSelection, GridMove.PageUp),
+            Key.PageDown => new(BrowserCommand.MoveSelection, GridMove.PageDown),
+            Key.Home => new(BrowserCommand.MoveSelection, GridMove.Home),
+            Key.End => new(BrowserCommand.MoveSelection, GridMove.End),
+            _ => default,
+        };
+    }
+
+    /// <summary>The browser's window-wide keys (the View and File menus list the same shortcuts).</summary>
+    private static BrowserInput MapWindowKey(Key key, ModifierKeys mods)
+    {
+        bool ctrl = (mods & ModifierKeys.Control) != 0;
+        if (key == Key.F5) return new(BrowserCommand.Rescan);
+        if (key == Key.Enter && mods == ModifierKeys.None && EnterStartsSlideshow()) return new(BrowserCommand.StartSlideshow);
+        if (!ctrl) return default;
+        return key switch
+        {
+            Key.O => new(BrowserCommand.OpenFolder),
+            Key.I => new(BrowserCommand.ToggleInfoPanel),
+            Key.F => new(BrowserCommand.ToggleSubfolders),
+            Key.S => new(BrowserCommand.ToggleRandom),
+            Key.OemPlus or Key.Add => new(BrowserCommand.LargerThumbnails),
+            Key.OemMinus or Key.Subtract => new(BrowserCommand.SmallerThumbnails),
+            _ => default,
+        };
+    }
+
+    /// <summary>False where Enter already does something: an open menu, a focused button or a text box.</summary>
+    private static bool EnterStartsSlideshow()
+        => Keyboard.FocusedElement is not (MenuItem or Button or TextBoxBase);
+
+    private void Execute(BrowserInput input)
+    {
+        switch (input.Command)
+        {
+            case BrowserCommand.Rescan: Rescan(); break;
+            case BrowserCommand.StartSlideshow: StartSlideshow(_settings.SlideshowDefaultFullScreen); break;
+            case BrowserCommand.OpenFolder: OnOpenFolder(this, new RoutedEventArgs()); break;
+            case BrowserCommand.ToggleInfoPanel: SetInfoPanelVisible(InfoPanel.Visibility != Visibility.Visible); break;
+            case BrowserCommand.ToggleSubfolders:
+                SubfoldersCheck.IsChecked = SubfoldersCheck.IsChecked != true;
+                OnToggleSubfolders(SubfoldersCheck, new RoutedEventArgs());
                 break;
-            case Key.Left or Key.Right or Key.Up or Key.Down or Key.PageUp or Key.PageDown or Key.Home or Key.End
-                when !shift && !ctrl && _items.Count > 0:
-                // Navigate by item index and row arithmetic rather than by the containers on screen:
-                // in a virtualized grid most items have no container to move focus between.
-                MoveSelection(e.Key);
-                e.Handled = true;
+            case BrowserCommand.ToggleRandom:
+                RandomCheck.IsChecked = RandomCheck.IsChecked != true;
+                OnToggleRandom(RandomCheck, new RoutedEventArgs());
                 break;
+            case BrowserCommand.LargerThumbnails: _view.CellWidth += ThumbnailGridMath.SizeStep; break;
+            case BrowserCommand.SmallerThumbnails: _view.CellWidth -= ThumbnailGridMath.SizeStep; break;
+            case BrowserCommand.Delete: OnDelete(this, new RoutedEventArgs()); break;
+            case BrowserCommand.MoveSelection: MoveSelection(input.Move); break;
         }
     }
 
-    private void MoveSelection(Key key)
+    private void MoveSelection(GridMove move)
     {
         var sv = FindThumbScroll();
         int cols = ThumbnailGridMath.Columns(sv?.ViewportWidth ?? ThumbList.ActualWidth, _view.OuterCellWidth);
         int rows = ThumbnailGridMath.VisibleRowCount(sv?.ViewportHeight ?? ThumbList.ActualHeight, _view.OuterCellHeight);
-        var move = key switch
-        {
-            Key.Left => GridMove.Left,
-            Key.Right => GridMove.Right,
-            Key.Up => GridMove.Up,
-            Key.Down => GridMove.Down,
-            Key.PageUp => GridMove.PageUp,
-            Key.PageDown => GridMove.PageDown,
-            Key.Home => GridMove.Home,
-            _ => GridMove.End,
-        };
         SelectOnly(ThumbnailGridMath.MoveTarget(move, ThumbList.SelectedIndex, _items.Count, cols, rows));
     }
 
@@ -848,40 +904,6 @@ public partial class MainWindow : Window
         _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             (ThumbList.ItemContainerGenerator.ContainerFromItem(item) as ListBoxItem)?.Focus()));
     }
-
-    protected override void OnPreviewKeyDown(KeyEventArgs e)
-    {
-        base.OnPreviewKeyDown(e);
-        if (e.Handled) return;
-        bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
-        if (e.Key == Key.F5) { Rescan(); e.Handled = true; }
-        else if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.None && EnterStartsSlideshow())
-        {
-            // Window-wide so it works with nothing selected (focus is then usually on the folder tree).
-            StartSlideshow(_settings.SlideshowDefaultFullScreen);
-            e.Handled = true;
-        }
-        else if (ctrl && e.Key == Key.O) { OnOpenFolder(this, e); e.Handled = true; }
-        else if (ctrl && e.Key == Key.I) { OnToggleInfoPanel(this, e); e.Handled = true; }
-        else if (ctrl && e.Key == Key.F)
-        {
-            SubfoldersCheck.IsChecked = SubfoldersCheck.IsChecked != true;
-            OnToggleSubfolders(SubfoldersCheck, e);
-            e.Handled = true;
-        }
-        else if (ctrl && e.Key == Key.S)
-        {
-            RandomCheck.IsChecked = RandomCheck.IsChecked != true;
-            OnToggleRandom(RandomCheck, e);
-            e.Handled = true;
-        }
-        else if (ctrl && (e.Key == Key.OemPlus || e.Key == Key.Add)) { _view.CellWidth += ThumbnailGridMath.SizeStep; e.Handled = true; }
-        else if (ctrl && (e.Key == Key.OemMinus || e.Key == Key.Subtract)) { _view.CellWidth -= ThumbnailGridMath.SizeStep; e.Handled = true; }
-    }
-
-    /// <summary>False where Enter already does something: an open menu, a focused button or a text box.</summary>
-    private static bool EnterStartsSlideshow()
-        => Keyboard.FocusedElement is not (MenuItem or Button or TextBoxBase);
 
     // ===============================================================================================
     // Menu: file operations

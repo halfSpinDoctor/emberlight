@@ -52,7 +52,10 @@ the WIC decoder and the Dispatcher), `ThumbnailGridMath.ReleasedIndices`/`MoveTa
 keys), `ViewerInput` (wheel/keypad/drag maths), `SlidePreload`, `OrientationEditor` and `FileDeletion` (rotate and
 delete outcomes; the Recycle Bin is platform code behind `IRecycleBin`), `PreferencesInput`/`PreferencesFollowUp`
 (field checks, rescan/re-sort after OK) and `ColorText` (colour preferences without WPF's ColorConverter; it doesn't
-read the `sc#` scRGB form, which ColorConverter does).
+read the `sc#` scRGB form, which ColorConverter does), `BrowserCommand`/`BrowserCommands` (browser keys as commands; the
+window's `MapWindowKey`/`MapGridKey` are the Windows bindings and `Execute` runs them), `SlideshowHelp`/`KeyHelp` (the
+help screen's topics and layout; the slideshow window's `HelpKeys` supplies the Windows key names, keep it in step
+with `MapKey`) and `FolderJumper` (Ctrl+Right/Left: reference folder, key repeat, background search, messages).
 Compare paths with `PathUtil.Comparer`/`PathUtil.Comparison`/`PathUtil.SamePath`, never a hard-coded
 `OrdinalIgnoreCase` (that stays only for file extensions), so case rules live in one place.
 This split is also groundwork for a possible macOS front end sharing Core. As of 2026-10-15 the list of logic still
@@ -66,7 +69,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~303 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~321 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.
