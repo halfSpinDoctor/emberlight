@@ -611,6 +611,20 @@ Which files a slideshow started from the browser shows (`StartupTarget.FromSelec
 - **several selected: just those, in grid order, from the first**.
 - **a selected file that is no longer in the grid starts at the beginning**.
 
+### PinnedFolders
+The folders pinned above the folder tree (`PinnedFolders`), with made-up paths: nothing touches the disk.
+
+- **pins go at the bottom, once each; saved lists lose blanks and repeats**: Pinning the same folder again (with a
+  trailing separator, or other case on Windows) or a blank does nothing; a saved list keeps its first copy of each.
+- **unpinning and moving up and down, stopping at the ends**: The top pin can't go up, the bottom one can't go down.
+- **Ctrl+1 to Ctrl+9 open the first nine pins**: Which pin each number opens, the "Ctrl+N" text, tooltips with and
+  without a shortcut, and the key is left alone when there is no such pin.
+- **labels are folder names, with the parent added when two match**: "2024 (Holidays)"; if the parent's name matches
+  too, the full path. On Windows, a drive keeps its root path and a share is labelled as in the tree.
+- **pin command text and messages**: Pin or Unpin, depending on whether the folder is pinned.
+- **pins are saved with the settings, cleaned on load**: A round trip keeps them in order; blanks, nulls and repeats in
+  a hand-edited file are dropped; a null list loads as empty; nothing is pinned at first.
+
 ### Thumbnail sizes
 - **cell widths are whole numbers within the allowed range**: Rounding and both limits.
 - **cells have a 4 px margin and a 20 px caption; size steps are 20**: The constants the grid template and the
@@ -784,8 +798,9 @@ The state behind the Preferences colour picker.
 ### Browser commands
 The browser's keys as commands (`BrowserCommand`); the Windows key bindings are in `MainWindow`.
 
-- **moving in the grid needs something in the grid; everything else always runs**: Grid moves on an empty grid are
-  left to the list itself; every other command runs; None never does.
+- **moving in the grid needs something in the grid; pin keys need the pin; everything else always runs**: Grid moves
+  on an empty grid are left to the list itself; every other command runs; None never does. (The pin keys are tested
+  under PinnedFolders.)
 - **an input carries its grid direction**: And the default input is None.
 
 ### Key help

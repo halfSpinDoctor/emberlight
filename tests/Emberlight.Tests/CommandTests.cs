@@ -22,12 +22,12 @@ internal static class CommandTests
     {
         T.Group("Browser commands");
 
-        T.Run("moving in the grid needs something in the grid; everything else always runs", () =>
+        T.Run("moving in the grid needs something in the grid; pin keys need the pin; everything else always runs", () =>
         {
             var move = new BrowserInput(BrowserCommand.MoveSelection, GridMove.Down);
             T.True(!BrowserCommands.CanRun(move, 0), "empty grid: leave the key to the list");
             T.True(BrowserCommands.CanRun(move, 1));
-            foreach (var c in Enum.GetValues<BrowserCommand>().Except([BrowserCommand.None, BrowserCommand.MoveSelection]))
+            foreach (var c in Enum.GetValues<BrowserCommand>().Except([BrowserCommand.None, BrowserCommand.MoveSelection, BrowserCommand.OpenPinned]))
                 T.True(BrowserCommands.CanRun(new BrowserInput(c), 0), c.ToString());
             T.True(!BrowserCommands.CanRun(default, 5), "None never runs");
         });

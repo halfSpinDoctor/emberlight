@@ -36,6 +36,97 @@ internal static class BrowserTests
         PathHelperTests();
         SlideshowSelectionTests();
         GridSizeTests();
+        PinnedFolderTests();
+    }
+
+    static void PinnedFolderTests()
+    {
+        T.Group("PinnedFolders");
+        string Root(params string[] parts) => Path.Combine([Path.GetTempPath(), "pins", .. parts]);
+
+        T.Run("pins go at the bottom, once each; saved lists lose blanks and repeats", () =>
+        {
+            var pins = new PinnedFolders();
+            T.True(pins.Pin(Root("a")) && pins.Pin(Root("b")));
+            T.True(!pins.Pin(Root("a")), "already pinned");
+            T.True(!pins.Pin(Root("b") + Path.DirectorySeparatorChar), "a trailing separator is the same folder");
+            if (OperatingSystem.IsWindows()) T.True(!pins.Pin(Root("A")), "case is ignored on Windows");
+            T.True(!pins.Pin("  "), "blank");
+            T.SeqEq(new[] { Root("a"), Root("b") }, pins.Paths);
+
+            var saved = new PinnedFolders(new[] { Root("x"), "", null!, Root("y"), Root("x") });
+            T.SeqEq(new[] { Root("x"), Root("y") }, saved.Paths, "first copy kept, in order");
+        });
+
+        T.Run("unpinning and moving up and down, stopping at the ends", () =>
+        {
+            var pins = new PinnedFolders(new[] { Root("a"), Root("b"), Root("c") });
+            T.True(!pins.CanMove(Root("a"), -1) && !pins.Move(Root("a"), -1), "top can't go up");
+            T.True(!pins.CanMove(Root("c"), +1), "bottom can't go down");
+            T.True(!pins.CanMove(Root("zzz"), +1), "not pinned");
+            T.True(pins.Move(Root("a"), +1));
+            T.SeqEq(new[] { Root("b"), Root("a"), Root("c") }, pins.Paths);
+            T.True(pins.Move(Root("c"), -1));
+            T.SeqEq(new[] { Root("b"), Root("c"), Root("a") }, pins.Paths);
+            T.True(pins.Unpin(Root("c") + Path.DirectorySeparatorChar) && !pins.Unpin(Root("c")));
+            T.SeqEq(new[] { Root("b"), Root("a") }, pins.Paths);
+        });
+
+        T.Run("Ctrl+1 to Ctrl+9 open the first nine pins", () =>
+        {
+            var pins = new PinnedFolders(Enumerable.Range(1, 11).Select(i => Root($"p{i}")));
+            T.Eq(Root("p1"), pins.ForShortcut(1));
+            T.Eq(Root("p9"), pins.ForShortcut(9));
+            T.Eq(null, pins.ForShortcut(10));
+            T.Eq(null, pins.ForShortcut(0));
+            T.Eq(null, new PinnedFolders(new[] { Root("a") }).ForShortcut(2), "no second pin");
+            T.Eq("Ctrl+1", PinnedFolders.ShortcutText(0));
+            T.Eq("Ctrl+9", PinnedFolders.ShortcutText(8));
+            T.Eq(null, PinnedFolders.ShortcutText(9));
+            T.Eq($"{Root("p2")} (Ctrl+2)", pins.ToolTip(1));
+            T.Eq(Root("p10"), pins.ToolTip(9), "no shortcut after the ninth");
+
+            T.True(BrowserCommands.CanRun(new BrowserInput(BrowserCommand.OpenPinned, Number: 2), 0, pinCount: 2));
+            T.True(!BrowserCommands.CanRun(new BrowserInput(BrowserCommand.OpenPinned, Number: 3), 0, pinCount: 2),
+                "no third pin: the key is left alone");
+            T.True(!BrowserCommands.CanRun(new BrowserInput(BrowserCommand.OpenPinned, Number: 10), 0, pinCount: 20));
+        });
+
+        T.Run("labels are folder names, with the parent added when two match", () =>
+        {
+            var pins = new PinnedFolders(new[] { Root("Holidays", "2024"), Root("Work", "2024"), Root("Scans"), Root("x", "Same", "2024"), Root("y", "Same", "2024") });
+            T.SeqEq(new[] { "2024 (Holidays)", "2024 (Work)", "Scans", Root("x", "Same", "2024"), Root("y", "Same", "2024") }, pins.Labels(),
+                "still the same with the parent: the full path");
+            T.Eq("2024", PinnedFolders.Name(Root("Holidays", "2024") + Path.DirectorySeparatorChar));
+            if (OperatingSystem.IsWindows())
+            {
+                T.Eq(@"D:\", PinnedFolders.Name(@"D:\"), "a drive keeps its root path");
+                T.Eq(@"share (\\server)", PinnedFolders.Name(@"\\server\share"), "a share is named as in the tree");
+                T.Eq("Photos", PinnedFolders.Name(@"\\server\share\Photos"));
+            }
+        });
+
+        T.Run("pin command text and messages", () =>
+        {
+            var pins = new PinnedFolders(new[] { Root("a") });
+            T.Eq("Unpin Current Folder", pins.PinCommandText(Root("a"), "Current Folder"));
+            T.Eq("Pin Folder", pins.PinCommandText(Root("b"), "Folder"));
+            T.Eq("Pin Current Folder", pins.PinCommandText(null, "Current Folder"), "no folder open");
+            T.True(PinnedFolders.NotFound(Root("a")).Contains(Root("a")));
+        });
+
+        T.Run("pins are saved with the settings, cleaned on load", () =>
+        {
+            using var d = new TempDir();
+            var s = new AppSettings { PinnedFolders = [Root("a"), Root("b")] };
+            T.True(SettingsStore.Save(s, d.File("s.json")));
+            T.SeqEq(new[] { Root("a"), Root("b") }, SettingsStore.Load(d.File("s.json")).PinnedFolders);
+            File.WriteAllText(d.File("bad.json"), "{ \"PinnedFolders\": [\"\", null, \"C:\\\\x\", \"c:\\\\X\\\\\"] }");
+            T.Eq(1, SettingsStore.Load(d.File("bad.json")).PinnedFolders.Count, "blank, null and repeat dropped");
+            File.WriteAllText(d.File("none.json"), "{ \"PinnedFolders\": null }");
+            T.Eq(0, SettingsStore.Load(d.File("none.json")).PinnedFolders.Count);
+            T.Eq(0, new AppSettings().PinnedFolders.Count, "nothing pinned at first");
+        });
     }
 
     static void ImageInfoTests()

@@ -34,6 +34,27 @@
             <MenuItem Header="Move to Recycle _Bin" InputGestureText="Del" Click="OnDelete"/>
         </ContextMenu>
 
+        <!-- Right-click on a pinned folder. An exception to the menu-bar rule (decided with the user): managing pins
+             happens where the pins are, so Move Up / Move Down live only here. -->
+        <ContextMenu x:Key="PinContextMenu" FontSize="12" Opened="OnPinContextMenuOpened">
+            <ContextMenu.Resources>
+                <Style TargetType="MenuItem" BasedOn="{StaticResource CompactMenuItem}"/>
+            </ContextMenu.Resources>
+            <MenuItem Header="_Unpin Folder" Click="OnContextTogglePin"/>
+            <Separator/>
+            <MenuItem Tag="Up" Header="Move _Up" Click="OnPinMoveUp"/>
+            <MenuItem Tag="Down" Header="Move _Down" Click="OnPinMoveDown"/>
+        </ContextMenu>
+
+        <!-- Right-click on a folder in the tree: pins (or unpins) that folder without opening it. Also an exception to
+             the menu-bar rule; the File menu's version works on the folder on screen. -->
+        <ContextMenu x:Key="TreeContextMenu" FontSize="12" Opened="OnTreeContextMenuOpened">
+            <ContextMenu.Resources>
+                <Style TargetType="MenuItem" BasedOn="{StaticResource CompactMenuItem}"/>
+            </ContextMenu.Resources>
+            <MenuItem Header="_Pin Folder" Click="OnContextTogglePin"/>
+        </ContextMenu>
+
         <!-- Zero padding/border/minimum size so every cell is exactly CellWidth + 2*margin wide; the visible-range
              maths in ThumbnailGridMath relies on that. Based on the theme's own style (Fluent), which otherwise
              adds padding and a minimum height. -->
@@ -72,6 +93,8 @@
             </Menu.Resources>
             <MenuItem Header="_File" SubmenuOpened="OnFileMenuOpened">
                 <MenuItem Header="_Open Folder..." InputGestureText="Ctrl+O" Click="OnOpenFolder"/>
+                <!-- Filled in code (RebuildPins): each pin with its Ctrl+number, then Pin/Unpin Current Folder. -->
+                <MenuItem x:Name="PinnedMenu" Header="_Pinned Folders"/>
                 <Separator/>
                 <MenuItem Header="Start _Slideshow" InputGestureText="Enter" Click="OnStartSlideshow"/>
                 <MenuItem Header="Start Slideshow in a _Window" Click="OnStartSlideshowWindowed"/>
@@ -179,22 +202,56 @@
                 <ColumnDefinition x:Name="InfoColumn" Width="0"/>
             </Grid.ColumnDefinitions>
 
-            <TreeView x:Name="FolderTree" Grid.Column="0" BorderThickness="0,0,1,0"
-                      SelectedItemChanged="OnFolderSelected"
-                      PreviewMouseLeftButtonDown="OnTreePreviewMouseDown">
-                <TreeView.Resources>
-                    <!-- Compact rows: Fluent's defaults are 14 px text in 28 px rows. The tree items are created in
-                         code, so these apply through resource lookup. -->
-                    <sys:Double x:Key="TreeViewItemFontSize">12</sys:Double>
-                    <Thickness x:Key="TreeViewItemPresenterPadding">0</Thickness>
-                    <Thickness x:Key="TreeViewItemPresenterMargin">0</Thickness>
-                    <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
-                        <Setter Property="FontSize" Value="12"/>
-                        <Setter Property="MinHeight" Value="0"/>
-                        <Setter Property="Padding" Value="2,1"/>
-                    </Style>
-                </TreeView.Resources>
-            </TreeView>
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- Pinned folders, above the tree. Only shown while something is pinned; about six rows, then it scrolls.
+                     The items are created in code (RebuildPins). Right-clicking doesn't select (that would open the pin). -->
+                <ListBox x:Name="PinList" Grid.Row="0" Visibility="Collapsed" MaxHeight="142" Padding="0,2"
+                         BorderThickness="0,0,1,0" BorderBrush="{Binding BorderBrush, ElementName=FolderTree}"
+                         Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         SelectionChanged="OnPinSelected" PreviewMouseRightButtonDown="OnPinRightButtonDown">
+                    <ListBox.Resources>
+                        <!-- Compact rows matching the tree's 12 px text and 22 px rows (Fluent's list items are taller). -->
+                        <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                            <Setter Property="FontSize" Value="12"/>
+                            <Setter Property="MinHeight" Value="0"/>
+                            <Setter Property="Height" Value="22"/>
+                            <Setter Property="Padding" Value="8,0"/>
+                            <Setter Property="Margin" Value="2,0"/>
+                            <Setter Property="VerticalContentAlignment" Value="Center"/>
+                            <Setter Property="ContextMenu" Value="{StaticResource PinContextMenu}"/>
+                        </Style>
+                    </ListBox.Resources>
+                </ListBox>
+
+                <!-- A thin line between the pins and the tree, in the same divider colour as the info panel's edge
+                     (the tree's own border brush is invisible in Fluent). Shown and hidden with the pins. -->
+                <Border Grid.Row="1" Height="1" Background="{DynamicResource DividerStrokeColorDefaultBrush}"
+                        Visibility="{Binding Visibility, ElementName=PinList}"/>
+
+                <TreeView x:Name="FolderTree" Grid.Row="2" BorderThickness="0,0,1,0"
+                          SelectedItemChanged="OnFolderSelected"
+                          PreviewMouseLeftButtonDown="OnTreePreviewMouseDown">
+                    <TreeView.Resources>
+                        <!-- Compact rows: Fluent's defaults are 14 px text in 28 px rows. The tree items are created in
+                             code, so these apply through resource lookup. -->
+                        <sys:Double x:Key="TreeViewItemFontSize">12</sys:Double>
+                        <Thickness x:Key="TreeViewItemPresenterPadding">0</Thickness>
+                        <Thickness x:Key="TreeViewItemPresenterMargin">0</Thickness>
+                        <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+                            <Setter Property="FontSize" Value="12"/>
+                            <Setter Property="MinHeight" Value="0"/>
+                            <Setter Property="Padding" Value="2,1"/>
+                            <Setter Property="ContextMenu" Value="{StaticResource TreeContextMenu}"/>
+                        </Style>
+                    </TreeView.Resources>
+                </TreeView>
+            </Grid>
 
             <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                           Background="Transparent" ResizeBehavior="PreviousAndNext"/>

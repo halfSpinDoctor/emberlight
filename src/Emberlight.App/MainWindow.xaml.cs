@@ -23,6 +23,11 @@ public partial class MainWindow : Window
     private readonly AppSettings _settings;
     private readonly string? _startPath;
     private readonly ImageFileTypes _types = new();
+    private readonly PinnedFolders _pins;                 // the folders pinned above the tree, saved in the settings
+    private MenuItem? _pinCurrentItem;                    // File > Pinned Folders > Pin/Unpin Current Folder
+    private bool _suppressPinNav;                         // selecting a pin from code (the highlight) doesn't open it
+    private int _pinOpenVersion;                          // the latest pin asked to open (finding it can be slow)
+    private string? _contextFolder;                       // the folder a pin or tree right-click menu is for
     private readonly DirectoryScanner _scanner;
     private readonly BulkObservableCollection<ThumbnailItem> _items = new();   // what the grid shows; changed through _listing
     private readonly FileListing<ThumbnailItem> _listing;                     // keeps _items sorted and looks items up by path
@@ -59,6 +64,7 @@ public partial class MainWindow : Window
         _scanner = new DirectoryScanner(_types);
         _listing = new FileListing<ThumbnailItem>(_items, p => new ThumbnailItem(p), i => i.Path, settings.SortOrder, _items.ReplaceAll);
         _subfolders = new SubfolderScope(settings);
+        _pins = new PinnedFolders(settings.PinnedFolders);
 
         _view.CellWidth = settings.ThumbCellWidth;
         _view.ShowFilenames = settings.ShowFilenames;
@@ -82,6 +88,7 @@ public partial class MainWindow : Window
 
         BuildSortMenu();
         SyncMenuState();
+        RebuildPins();
 
         _followTimer.Tick += (_, _) => FlushFolderFollow();
         _drivePoll.Tick += OnDrivePoll;
@@ -132,6 +139,7 @@ public partial class MainWindow : Window
         if (TreeColumn.ActualWidth > 0) _settings.FolderTreeWidth = TreeColumn.ActualWidth;
         if (InfoPanel.Visibility == Visibility.Visible && InfoColumn.ActualWidth > 0) _settings.InfoPanelWidth = InfoColumn.ActualWidth;
         _settings.IgnoredFileTypes = _types.DisabledExtensions.ToList();
+        _settings.PinnedFolders = _pins.Paths.ToList();
     }
 
     // ===============================================================================================
@@ -466,6 +474,7 @@ public partial class MainWindow : Window
         if (_subfolders.BeforeNavigate(_currentFolder, path)) SyncMenuState();   // left the tree: it switched itself off
         _isLoading = true;
         _currentFolder = path;
+        HighlightCurrentPin();
         _watcher.Stop();
         _listing.ResetMetadata();
         if (inPlace)
@@ -947,7 +956,7 @@ public partial class MainWindow : Window
 
     private bool RunIfApplicable(BrowserInput input)
     {
-        if (!BrowserCommands.CanRun(input, _items.Count)) return false;
+        if (!BrowserCommands.CanRun(input, _items.Count, _pins.Count)) return false;
         Execute(input);
         return true;
     }
@@ -980,6 +989,8 @@ public partial class MainWindow : Window
         if (key == Key.F5) return new(BrowserCommand.Rescan);
         if (key == Key.Enter && mods == ModifierKeys.None && EnterStartsSlideshow()) return new(BrowserCommand.StartSlideshow);
         if (!ctrl) return default;
+        if (key is >= Key.D1 and <= Key.D9) return new(BrowserCommand.OpenPinned, Number: key - Key.D0);
+        if (key is >= Key.NumPad1 and <= Key.NumPad9) return new(BrowserCommand.OpenPinned, Number: key - Key.NumPad0);
         return key switch
         {
             Key.O => new(BrowserCommand.OpenFolder),
@@ -1016,6 +1027,9 @@ public partial class MainWindow : Window
             case BrowserCommand.SmallerThumbnails: _view.CellWidth -= ThumbnailGridMath.SizeStep; break;
             case BrowserCommand.Delete: OnDelete(this, new RoutedEventArgs()); break;
             case BrowserCommand.Rename: OnRename(this, new RoutedEventArgs()); break;
+            case BrowserCommand.OpenPinned:
+                if (_pins.ForShortcut(input.Number) is { } pin && !PathUtil.SamePath(pin, _currentFolder)) OpenPinned(pin);
+                break;
             case BrowserCommand.MoveSelection: MoveSelection(input.Move); break;
         }
     }
@@ -1037,6 +1051,151 @@ public partial class MainWindow : Window
         // The item's container may not exist until the next layout pass scrolls it into the realized range.
         _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             (ThumbList.ItemContainerGenerator.ContainerFromItem(item) as ListBoxItem)?.Focus()));
+    }
+
+    // ===============================================================================================
+    // Pinned folders
+    // ===============================================================================================
+
+    /// <summary>
+    /// Shows the pins (<see cref="PinnedFolders"/>) above the tree and in File &gt; Pinned Folders, with their Ctrl+number
+    /// shortcuts. The list above the tree is only there while something is pinned.
+    /// </summary>
+    private void RebuildPins()
+    {
+        var labels = _pins.Labels();
+        _suppressPinNav = true;
+        try
+        {
+            PinList.Items.Clear();
+            for (int i = 0; i < _pins.Count; i++)
+                PinList.Items.Add(new ListBoxItem { Content = PinRow(labels[i]), Tag = _pins.Paths[i], ToolTip = _pins.ToolTip(i) });
+        }
+        finally { _suppressPinNav = false; }
+        PinList.Visibility = _pins.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        HighlightCurrentPin();
+
+        PinnedMenu.Items.Clear();
+        for (int i = 0; i < _pins.Count; i++)
+        {
+            string path = _pins.Paths[i];
+            var item = new MenuItem
+            {
+                Header = labels[i].Replace("_", "__"),           // an underscore would otherwise be an access key
+                InputGestureText = PinnedFolders.ShortcutText(i) ?? "",
+                ToolTip = path,
+            };
+            item.Click += (_, _) => { if (!PathUtil.SamePath(path, _currentFolder)) OpenPinned(path); };
+            PinnedMenu.Items.Add(item);
+        }
+        if (_pins.Count == 0) PinnedMenu.Items.Add(new MenuItem { Header = "No pinned folders", IsEnabled = false });
+        PinnedMenu.Items.Add(new Separator());
+        _pinCurrentItem = new MenuItem { Header = "_" + _pins.PinCommandText(_currentFolder, "Current Folder") };
+        _pinCurrentItem.Click += (_, _) => { if (_currentFolder != null) TogglePin(_currentFolder); };
+        PinnedMenu.Items.Add(_pinCurrentItem);
+    }
+
+    /// <summary>A pin's row: a pin glyph and the folder's label.</summary>
+    private static StackPanel PinRow(string label)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(new TextBlock
+        {
+            Text = "",                                     // Pin, in Windows 11's icon font (MDL2 on older systems)
+            FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+            FontSize = 10,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 1, 6, 0),
+        });
+        row.Children.Add(new TextBlock { Text = label, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
+        return row;
+    }
+
+    /// <summary>Highlights the pin for the folder on screen, if it is pinned.</summary>
+    private void HighlightCurrentPin()
+    {
+        _suppressPinNav = true;
+        try { PinList.SelectedIndex = _pins.IndexOf(_currentFolder); }
+        finally { _suppressPinNav = false; }
+    }
+
+    private void OnPinSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressPinNav) return;
+        if (PinList.SelectedItem is ListBoxItem { Tag: string path }) OpenPinned(path);
+    }
+
+    /// <summary>A right-click would select the pin, and so open it; only its menu should appear.</summary>
+    private void OnPinRightButtonDown(object sender, MouseButtonEventArgs e) => e.Handled = true;
+
+    /// <summary>
+    /// Opens a pinned folder the way File &gt; Open does. Whether it exists is asked on a worker thread: it may be on a
+    /// drive or share that isn't connected, which can take a while to answer. A missing folder stays pinned.
+    /// </summary>
+    private async void OpenPinned(string path)
+    {
+        int version = ++_pinOpenVersion;
+        bool exists = await Task.Run(() => Directory.Exists(path));
+        if (version != _pinOpenVersion) return;                  // another pin was picked meanwhile
+        if (!exists)
+        {
+            StatusText.Text = PinnedFolders.NotFound(path);
+            HighlightCurrentPin();
+            return;
+        }
+        SelectPathInTree(path);
+        NavigateTo(path);
+    }
+
+    /// <summary>Pins the folder, or unpins it if it is pinned, and saves the pins straight away.</summary>
+    private void TogglePin(string path)
+    {
+        if (!_pins.Unpin(path)) _pins.Pin(path);
+        PinsChanged();
+    }
+
+    private void PinsChanged()
+    {
+        RebuildPins();
+        CaptureSessionState();                                   // the settings file also gets current values for the rest
+        if (!SettingsStore.Save(_settings)) StatusText.Text = PinnedFolders.NotSaved;
+    }
+
+    private void OnPinContextMenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ContextMenu menu) return;
+        _contextFolder = (menu.PlacementTarget as ListBoxItem)?.Tag as string;
+        foreach (var item in menu.Items.OfType<MenuItem>())
+            item.IsEnabled = _contextFolder != null && item.Tag switch
+            {
+                "Up" => _pins.CanMove(_contextFolder, -1),
+                "Down" => _pins.CanMove(_contextFolder, +1),
+                _ => true,
+            };
+    }
+
+    private void OnTreeContextMenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ContextMenu menu) return;
+        _contextFolder = (menu.PlacementTarget as TreeViewItem)?.Tag as string;   // null for the "…" placeholder
+        foreach (var item in menu.Items.OfType<MenuItem>())
+        {
+            item.Header = "_" + _pins.PinCommandText(_contextFolder, "Folder");
+            item.IsEnabled = _contextFolder != null;
+        }
+    }
+
+    private void OnContextTogglePin(object sender, RoutedEventArgs e)
+    {
+        if (_contextFolder != null) TogglePin(_contextFolder);
+    }
+
+    private void OnPinMoveUp(object sender, RoutedEventArgs e) => MovePin(-1);
+    private void OnPinMoveDown(object sender, RoutedEventArgs e) => MovePin(+1);
+
+    private void MovePin(int delta)
+    {
+        if (_contextFolder != null && _pins.Move(_contextFolder, delta)) PinsChanged();
     }
 
     // ===============================================================================================
@@ -1073,8 +1232,20 @@ public partial class MainWindow : Window
         if (result.FailureText is { } failure) StatusText.Text = failure;
     }
 
-    /// <summary>Rename works on one file at a time, so the menu item is greyed out unless exactly one is selected.</summary>
-    private void OnFileMenuOpened(object sender, RoutedEventArgs e) => MenuRename.IsEnabled = SelectedItems().Count == 1;
+    /// <summary>
+    /// Rename works on one file at a time, so the menu item is greyed out unless exactly one is selected. Pin Current
+    /// Folder says Unpin when the folder on screen is pinned.
+    /// </summary>
+    private void OnFileMenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, sender)) return;   // a submenu (Pinned Folders) opening
+        MenuRename.IsEnabled = SelectedItems().Count == 1;
+        if (_pinCurrentItem != null)
+        {
+            _pinCurrentItem.Header = "_" + _pins.PinCommandText(_currentFolder, "Current Folder");
+            _pinCurrentItem.IsEnabled = _currentFolder != null;
+        }
+    }
 
     /// <summary>The thumbnails' right-click menu (its items are all File menu items; see ThumbContextMenu).</summary>
     private void OnThumbContextMenuOpened(object sender, RoutedEventArgs e)

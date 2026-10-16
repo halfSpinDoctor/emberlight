@@ -61,6 +61,10 @@ Core and the tests also build and run on Linux and macOS; the app itself needs W
   entry when you open a folder on it. New and deleted subfolders show up by themselves in the folder on screen, and
   anywhere else when you open a folder again; drives that connect later (a VPN, a USB stick) appear within a few
   seconds.
+* **Pinned folders** - pin folders you go back to often (File > Pinned Folders > Pin Current Folder, or right-click a
+  folder in the tree). They're listed above the folder tree, which appears only once something is pinned, and in File >
+  Pinned Folders; `Ctrl+1` to `Ctrl+9` open the first nine. Right-click a pin to unpin it or move it up or down.
+  Pins are remembered between sessions.
 * **Right-click menu on thumbnails** - Copy To, Move To, Rename and Move to Recycle Bin (the same commands as the
   File menu).
 * **Rename** - `F2`, or File > Rename, renames the selected file in a small dialog. The name is checked as you type,

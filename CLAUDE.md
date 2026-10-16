@@ -43,7 +43,7 @@ first use. WPF can't be trimmed; don't enable PublishTrimmed.
 drop). When adding a feature, write the logic in Core with tests first and keep the WPF side to glue.
 Core is grouped in area folders; the namespace is `Emberlight.Core` throughout (folders only, no sub-namespaces):
 - **Browser/** - `FileListing` (sorted grid items, `Reconcile`), `SubfolderScope`, `BrowserCommands` (keys as
-  commands), `FolderTreeRoots`/`TreeChildren`, `ClickExpandTracker`, `ThumbnailGridMath`, `ThumbnailScheduler`.
+  commands), `PinnedFolders`, `FolderTreeRoots`/`TreeChildren`, `ClickExpandTracker`, `ThumbnailGridMath`, `ThumbnailScheduler`.
 - **Slideshow/** - `SlideshowState` (navigation), `SlideshowCommands`, `KeyHelp`/`SlideshowHelp`, `FolderJumper`
   (Ctrl+Right/Left), `SlideshowFollow`, `SlidePreload`, `WindowFit`, `WheelStepper`.
 - **Imaging/** - `ExifReader`/`ExifData`, `ImageOrientation`, `ImageInfo`, `DecodePolicy`, `GifAnimation`
@@ -71,7 +71,7 @@ describes every test in a line or two: update it whenever tests are added, renam
 are timing based and could be flaky on a loaded CI machine.
 
 ## Verification status (be honest about this)
-- Core: ~369 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
+- Core: ~375 tests, fuzz tests, and mutation checks (deliberately break the code, confirm tests fail).
 - App: originally written on Linux where WPF cannot run, so it was only compile-checked against WPF API
   definitions. Since then the user has run it on Windows: it launches and works, large folders load well, and
   the features below were exercised. Treat anything not listed as untested until run.
@@ -81,12 +81,27 @@ are timing based and could be flaky on a loaded CI machine.
 ## Design rules (decided with the user)
 - **Keep the window as simple as Phoenix Slides.** Don't add permanent on-screen controls (toolbars, buttons, panels)
   unless they're clearly justified; prefer menu items, keyboard shortcuts and right-click menus, which cost nothing
-  until used. (Back/forward buttons for folders were turned down for this reason; pinned folders at the top of the
-  tree are still to be discussed.)
+  until used. (Back/forward buttons for folders were turned down for this reason.) Something the user switches on
+  themselves can show up when they do: the pinned-folder list exists only while a folder is pinned.
 - **Right-click menus only contain items that are also in the menu bar**, with the same names, shortcuts and
   handlers. A right-click menu is a shortcut to existing commands, never a place for new ones.
+  **Exceptions (agreed with the user): managing pins.** A pin's right-click menu has Move Up / Move Down (only there),
+  and the folder tree's right-click menu has Pin Folder / Unpin Folder, which works on the folder clicked rather than
+  the folder on screen like File > Pinned Folders > Pin Current Folder. Don't add others without asking.
 
 ## Behaviour decisions made with the user (keep these)
+- **Pinned folders** (`PinnedFolders` in Core, `AppSettings.PinnedFolders`): saved in the settings, and saved as soon
+  as they change. Shown in a list above the folder tree (`PinList`) only while something is pinned; 22 px rows like
+  the tree, about six rows and then it scrolls, with a 1 px `DividerStrokeColorDefaultBrush` line between it and the
+  tree (the tree's own border brush is invisible in Fluent); no limit on the number. Clicking a pin opens it like File > Open (the
+  tree expands to it); the pin for the folder on screen is highlighted. Pins never expand in place (no duplicate
+  subtrees). New pins go at the bottom; order is changed with Move Up / Move Down on the pin's right-click menu (no
+  drag and drop). Pin with File > Pinned Folders > Pin Current Folder, or the tree's right-click Pin Folder; unpin
+  with the same commands or the pin's right-click Unpin Folder. File > Pinned Folders lists every pin, which is how the
+  Ctrl+1 to Ctrl+9 shortcuts (first nine pins) are shown; the pin tooltips show path and shortcut. Labels are the folder
+  name, plus the parent's name when two pins share a name. Nothing checks pins at startup (an offline drive could
+  stall the window); a pin is looked for on a worker thread when opened, and a missing one gives a status-bar message
+  and stays pinned.
 - **Thumbnail right-click menu** (`ThumbContextMenu` in `MainWindow.xaml`, set on each grid cell by
   `ThumbContainerStyle`): Copy To, Move To, Rename, then Move to Recycle Bin. The File menu lists them in the same
   order. Right-clicking an unselected thumbnail selects just it; inside a selection it keeps the selection (the
