@@ -28,11 +28,14 @@ Target framework is **net10.0 / net10.0-windows** (C# 14; migrated from .NET 8 o
 `scripts/publish.ps1` (self-contained + framework-dependent single-file x64 builds), `installer/Emberlight.iss`
 (Inno Setup, per-user install, optional "Open with" entries), `.github/workflows/release.yml` (tag `v*` -> GitHub
 release). Icon: `src/Emberlight.App/Assets/app.ico` (placeholder generated with Pillow). Version is set in two
-places: the App `.csproj` and the `.iss`. Builds are intentionally **unsigned** (user won't pay for a certificate; the
+places: the App `.csproj` and the `.iss`. Release notes: add a `## vX.Y.Z - date` section to `CHANGELOG.md` before
+tagging; the release workflow copies that section into the GitHub release above GitHub's automatic commit list (a tag
+without a section just gets the automatic list). Builds are intentionally **unsigned** (user won't pay for a certificate; the
 user turned off Windows 11 Smart App Control to run it). `publish.ps1` has an optional signing step (store cert, .pfx or
 Azure Artifact Signing) that is inert unless a signing option is given; see README "Windows security prompts". The packaging files were written without a Windows machine; the user has since built and run an exe from them
-(it launched but was blocked by Smart App Control, so the build itself works). The installer script and the release
-workflow have not been confirmed on Windows - verify them on first use. WPF can't be trimmed; don't enable PublishTrimmed.
+(it launched but was blocked by Smart App Control, so the build itself works). The release workflow has run
+successfully on GitHub for v0.1.0 and v0.2.0; the installer script has not been confirmed on Windows - verify it on
+first use. WPF can't be trimmed; don't enable PublishTrimmed.
 
 ## Architecture rule: decisions live in Core, UI stays thin
 `src/Emberlight.Core` (no dependencies, unit tested) holds every piece of real logic. `src/Emberlight.App`
