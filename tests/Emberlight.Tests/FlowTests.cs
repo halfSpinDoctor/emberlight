@@ -260,6 +260,45 @@ internal static class FlowTests
 
         T.Run("drives are looked for every 5 seconds", () => T.Eq(TimeSpan.FromSeconds(5), FolderTreeRoots.DrivePollInterval));
 
+        T.Run("ignored roots are dropped by a '*' pattern or an exact match; an empty list is a no-op", () =>
+        {
+            string[] present = ["/", "/Volumes/Backup", "/Volumes/.timemachine/ABC/1", "/Volumes/Recovery", "/dev"];
+            var kept = FolderTreeRoots.FilterIgnored(present,
+                ["/dev", "/Volumes/Recovery", "/Volumes/.timemachine/*"]);
+            T.SeqEq(new[] { "/", "/Volumes/Backup" }, kept);
+            T.SeqEq(present, FolderTreeRoots.FilterIgnored(present, []), "no patterns - nothing dropped");
+        });
+
+        T.Group("Pattern matching (PathUtil)");
+
+        T.Run("'*' matches any run of characters, including path separators", () =>
+        {
+            T.True(PathUtil.MatchesPattern("/System/Volumes/Data", "/System/*"));
+            T.True(PathUtil.MatchesPattern("/System", "/System"), "no wildcard - exact match");
+            T.True(!PathUtil.MatchesPattern("/System2", "/System"), "no wildcard - not a prefix match");
+            T.True(!PathUtil.MatchesPattern("/Other/Volumes/Data", "/System/*"));
+        });
+
+        T.Run("pattern matching is case-insensitive and ignores a trailing separator on either side", () =>
+        {
+            T.True(PathUtil.MatchesPattern("/Volumes/RECOVERY", "/volumes/recovery"));
+            T.True(PathUtil.MatchesPattern("/dev/", "/dev"));
+        });
+
+        T.Run("a literal '.' in a pattern is matched literally, not as a regex wildcard", () =>
+        {
+            T.True(PathUtil.MatchesPattern("/Volumes/.timemachine/x", "/Volumes/.timemachine/*"));
+            T.True(!PathUtil.MatchesPattern("/VolumesX timemachine/x", "/Volumes/.timemachine/*"),
+                "a literal dot shouldn't match any character");
+        });
+
+        T.Run("matches-any is true if any pattern matches, false if the list is empty or none do", () =>
+        {
+            T.True(PathUtil.MatchesAnyPattern("/dev", ["/System/*", "/dev"]));
+            T.True(!PathUtil.MatchesAnyPattern("/dev", ["/System/*"]));
+            T.True(!PathUtil.MatchesAnyPattern("/dev", []));
+        });
+
         T.Group("Folder tree updates");
         string P(string name) => Path.Combine(Path.GetTempPath(), "phx-tree", name);
         static List<string> Apply(IReadOnlyList<string> shown, ChildrenUpdate u)

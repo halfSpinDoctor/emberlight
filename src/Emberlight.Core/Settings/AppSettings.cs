@@ -70,6 +70,9 @@ public sealed class AppSettings
     public bool InfoPanelMoreExif { get; set; }
 
     public List<string> IgnoredFileTypes { get; set; } = new();
+    /// <summary>Folder-tree roots to hide (<see cref="FolderTreeRoots.FilterIgnored"/>), e.g. a Mac's hidden
+    /// system/Time Machine volumes; empty by default (today's Windows behaviour - nothing is hidden there).</summary>
+    public List<string> IgnoredTreeRootPatterns { get; set; } = new();
     /// <summary>The folders pinned above the folder tree, top to bottom (see <see cref="PinnedFolders"/>).</summary>
     public List<string> PinnedFolders { get; set; } = new();
     /// <summary>The names the user gave pinned folders (Rename Pin), keyed by path; pins not listed use their folder's name.</summary>
@@ -99,6 +102,7 @@ public sealed class AppSettings
         SlideshowInfoMode = Math.Clamp(SlideshowInfoMode, 0, 2);
         if (!Enum.IsDefined(IncludeSubfoldersMode)) IncludeSubfoldersMode = SubfolderMode.ResetOnNewTree;
         IgnoredFileTypes ??= new();
+        IgnoredTreeRootPatterns ??= new();
         // Drops nulls, blanks and repeats, and names of folders that aren't pinned (or blank names).
         var pins = new PinnedFolders(PinnedFolders, PinnedFolderNames);
         PinnedFolders = pins.Paths.ToList();

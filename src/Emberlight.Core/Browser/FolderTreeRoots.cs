@@ -68,6 +68,14 @@ public static class FolderTreeRoots
             now.Where(r => !tree.Contains(PathUtil.TrimSeparators(r)) && !busy.Contains(PathUtil.TrimSeparators(r))).ToList(),
             inTree.Where(r => !nowKeys.Contains(PathUtil.TrimSeparators(r))).ToList());
     }
+
+    /// <summary>
+    /// Drops every root matching one of <paramref name="ignorePatterns"/> (<see cref="PathUtil.MatchesAnyPattern"/>) -
+    /// e.g. a Mac's hidden system/Time Machine volumes the user doesn't want cluttering the tree. An empty pattern
+    /// list (today's Windows default - nothing is hidden there) is a no-op.
+    /// </summary>
+    public static IEnumerable<string> FilterIgnored(IEnumerable<string> roots, IReadOnlyList<string> ignorePatterns)
+        => ignorePatterns.Count == 0 ? roots : roots.Where(r => !PathUtil.MatchesAnyPattern(r, ignorePatterns));
 }
 
 /// <param name="ToCheck">Drive roots to check for readiness (and add if ready).</param>

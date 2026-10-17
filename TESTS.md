@@ -899,6 +899,15 @@ How the app starts from the command line (`StartupArgs.Plan`).
   down shows up once it reconnects.
 - **drive checks: case and trailing separators don't matter**.
 - **drives are looked for every 5 seconds**.
+- **ignored roots are dropped by a '*' pattern or an exact match; an empty list is a no-op**: `FolderTreeRoots.FilterIgnored`,
+  for hiding e.g. a Mac's system/Time Machine volumes; empty (today's Windows default) hides nothing.
+
+### Pattern matching (PathUtil)
+- **'*' matches any run of characters, including path separators**: `PathUtil.MatchesPattern`/`MatchesAnyPattern`;
+  "/System/*" matches everything under /System, not just one level down.
+- **pattern matching is case-insensitive and ignores a trailing separator on either side**.
+- **a literal '.' in a pattern is matched literally, not as a regex wildcard**.
+- **matches-any is true if any pattern matches, false if the list is empty or none do**.
 
 ### Folder tree updates
 Bringing a tree folder's subfolders up to date in place (`TreeChildren`), so folders already shown keep their

@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Emberlight.Core;
 
 public static class PathUtil
@@ -88,4 +90,18 @@ public static class PathUtil
     }
 
     private static string Trim(string p) => p.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    /// <summary>
+    /// Whether <paramref name="path"/> matches <paramref name="pattern"/>: '*' matches any run of characters
+    /// (including path separators, so "/System/*" matches everything under /System, not just one level down);
+    /// everything else is matched literally, using the same case rule as <see cref="Comparison"/>.
+    /// </summary>
+    public static bool MatchesPattern(string path, string pattern)
+    {
+        string regex = "^" + string.Join(".*", TrimSeparators(pattern).Split('*').Select(Regex.Escape)) + "$";
+        return Regex.IsMatch(TrimSeparators(path), regex, RegexOptions.IgnoreCase);
+    }
+
+    /// <summary>Whether <paramref name="path"/> matches any of <paramref name="patterns"/> (see <see cref="MatchesPattern"/>).</summary>
+    public static bool MatchesAnyPattern(string path, IEnumerable<string> patterns) => patterns.Any(p => MatchesPattern(path, p));
 }
