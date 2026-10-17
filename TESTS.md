@@ -701,6 +701,7 @@ Mouse and keypad input on the slideshow picture.
 ### Slide preloading
 - **the next two slides, then the previous one**: At the start, the end, and in one-slide and empty slideshows.
 - **works on a shuffled slideshow's list order**.
+- **a wider window (ahead/behind) than the default**: Custom ahead/behind counts, clamped at the start and end.
 - **no preloading within 200 ms of a navigation**: 199 ms is too soon, 200 ms is fine.
 
 ### OrientationEditor

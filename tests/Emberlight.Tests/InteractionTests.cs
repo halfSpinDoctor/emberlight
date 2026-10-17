@@ -450,6 +450,13 @@ internal static class InteractionTests
             T.SeqEq(new[] { list[3], list[4], list[1] }, c);
         });
 
+        T.Run("a wider window (ahead/behind) than the default", () =>
+        {
+            T.SeqEq(new[] { "c", "d", "e", "a" }, SlidePreload.Candidates(s, 1, ahead: 4, behind: 1));
+            T.SeqEq(new[] { "c", "a" }, SlidePreload.Candidates(s, 1, ahead: 1, behind: 2), "behind clamps at the start");
+            T.SeqEq(new[] { "d", "c", "b" }, SlidePreload.Candidates(s, 4, ahead: 2, behind: 3), "ahead clamps at the end");
+        });
+
         T.Run("no preloading within 200 ms of a navigation", () =>
         {
             T.True(!SlidePreload.IsSettled(1199, 1000));

@@ -9,13 +9,16 @@ public static class SlidePreload
     /// <summary>True once the user has paused on a slide long enough for preloading to be worthwhile.</summary>
     public static bool IsSettled(long nowMs, long lastNavigationMs) => nowMs - lastNavigationMs >= SettleMilliseconds;
 
-    /// <summary>The next two slides, then the previous one (in that order, the order they're loaded), within the list.</summary>
-    public static List<T> Candidates<T>(IReadOnlyList<T> slides, int current)
+    /// <summary>The next <paramref name="ahead"/> slides, then the previous <paramref name="behind"/> (in that
+    /// order, the order they're loaded), within the list. Defaults (2 ahead, 1 behind) are today's Windows
+    /// values.</summary>
+    public static List<T> Candidates<T>(IReadOnlyList<T> slides, int current, int ahead = 2, int behind = 1)
     {
-        var wanted = new List<T>(3);
-        if (current + 1 < slides.Count) wanted.Add(slides[current + 1]);
-        if (current + 2 < slides.Count) wanted.Add(slides[current + 2]);
-        if (current - 1 >= 0 && current - 1 < slides.Count) wanted.Add(slides[current - 1]);
+        var wanted = new List<T>(ahead + behind);
+        for (int i = 1; i <= ahead; i++)
+            if (current + i < slides.Count) wanted.Add(slides[current + i]);
+        for (int i = 1; i <= behind; i++)
+            if (current - i >= 0 && current - i < slides.Count) wanted.Add(slides[current - i]);
         return wanted;
     }
 }
