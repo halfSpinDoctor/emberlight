@@ -61,12 +61,16 @@ public static class FileDeletion
     /// The question asked before every delete (Yes/No): the file's name when there is one, otherwise how many.
     /// Null when there is nothing to delete.
     /// </summary>
-    public static string? ConfirmationText(IReadOnlyList<string> paths) => paths.Count switch
+    /// <param name="trashName">What the system calls the place deleted files go.</param>
+    public static string? ConfirmationText(IReadOnlyList<string> paths, string trashName = RecycleBin) => paths.Count switch
     {
         0 => null,
-        1 => $"Are you sure you want to send \"{Path.GetFileName(paths[0])}\" to the Recycle Bin?",
-        _ => $"Are you sure you want to send these {paths.Count} files to the Recycle Bin?",
+        1 => $"Are you sure you want to send \"{Path.GetFileName(paths[0])}\" to the {trashName}?",
+        _ => $"Are you sure you want to send these {paths.Count} files to the {trashName}?",
     };
+
+    /// <summary>Windows' name for the place deleted files go, the default wherever the name is shown.</summary>
+    public const string RecycleBin = "Recycle Bin";
 
     /// <summary>Deletes each file in turn; <paramref name="deleted"/> runs for each one that went.</summary>
     public static DeleteResult Delete(IEnumerable<string> paths, IRecycleBin bin, Action<string>? deleted = null)
@@ -106,27 +110,45 @@ public sealed record RenameResult(string? NewPath, string? Error)
 }
 
 /// <summary>
+/// What a file system allows in a file name. <see cref="Windows"/> is the default everywhere, so the rules are the same
+/// whichever system runs the tests; another front end passes its own.
+/// </summary>
+/// <param name="InvalidCharacters">Characters a name can't contain (control characters are always refused).</param>
+/// <param name="ReservedNames">Names that can't be used with any extension (Windows' device names), ignoring case.</param>
+/// <param name="NoTrailingDot">Whether a name can't end with a dot.</param>
+/// <param name="MaxNameLength">The longest name, counted in <paramref name="LengthUnit"/>.</param>
+/// <param name="SystemName">Names the system in messages ("a name Windows reserves for devices").</param>
+public sealed record FileNameRules(
+    string InvalidCharacters, IReadOnlyCollection<string> ReservedNames, bool NoTrailingDot,
+    int MaxNameLength, NameLengthUnit LengthUnit, string SystemName)
+{
+    /// <summary>Windows (NTFS): no \ / : * ? " &lt; &gt; |, no device names, no trailing dot, 255 UTF-16 characters.</summary>
+    public static FileNameRules Windows { get; } = new(
+        "\\/:*?\"<>|",
+        ["CON", "PRN", "AUX", "NUL",
+         "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+         "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"],
+        NoTrailingDot: true, MaxNameLength: 255, NameLengthUnit.Utf16Chars, "Windows");
+
+    /// <summary>The length of <paramref name="name"/> in this system's unit.</summary>
+    public int Length(string name) => LengthUnit == NameLengthUnit.Utf8Bytes ? System.Text.Encoding.UTF8.GetByteCount(name) : name.Length;
+
+    /// <summary>Whether a name's part before its first dot is one of <see cref="ReservedNames"/>.</summary>
+    public bool IsReserved(string stem) => ReservedNames.Contains(stem, StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>How a file system counts a name's length.</summary>
+public enum NameLengthUnit { Utf16Chars, Utf8Bytes }
+
+/// <summary>
 /// The browser's Rename command (one file at a time): checking the new name as it is typed, the question asked when
-/// the extension changes, and the rename itself. The name rules are Windows' (the app is Windows-only), so they are
-/// the same whichever system runs the tests.
+/// the extension changes, and the rename itself. The name rules are <see cref="FileNameRules.Windows"/> unless the
+/// caller passes others.
 /// </summary>
 public static class FileRename
 {
-    /// <summary>The characters Windows doesn't allow in a file name (control characters aside).</summary>
-    public const string InvalidCharacters = "\\/:*?\"<>|";
-
-    /// <summary>The longest name NTFS allows for one file.</summary>
-    public const int MaxNameLength = 255;
-
     /// <summary>The status bar line when Rename is asked for with no file or several files selected.</summary>
     public const string SelectOneFile = "Select one file to rename.";
-
-    private static readonly HashSet<string> Reserved = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "CON", "PRN", "AUX", "NUL",
-        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-    };
 
     /// <summary>The name as it will be used: typed spaces at either end are dropped, as Explorer does.</summary>
     public static string Clean(string typed) => typed.Trim();
@@ -146,17 +168,22 @@ public static class FileRename
     /// when it can. The unchanged name is not a problem (renaming to it does nothing). A change of case only is
     /// allowed: on Windows the "existing" file with that name is the file itself.
     /// </summary>
-    public static string? Problem(string path, string typed)
+    /// <param name="rules">The file system's name rules; <see cref="FileNameRules.Windows"/> when null.</param>
+    public static string? Problem(string path, string typed, FileNameRules? rules = null)
     {
+        rules ??= FileNameRules.Windows;
         string name = Clean(typed);
         if (name.Length == 0) return "Type a name for the file.";
-        if (name.Any(c => c < ' ' || InvalidCharacters.Contains(c)))
-            return $"A file name can't contain any of these characters: {string.Join(" ", InvalidCharacters.ToCharArray())}";
-        if (name.EndsWith('.')) return "A file name can't end with a dot.";
-        if (name.Length > MaxNameLength) return $"A file name can't be longer than {MaxNameLength} characters.";
+        if (name.Any(c => c < ' ' || rules.InvalidCharacters.Contains(c)))
+            return $"A file name can't contain any of these characters: {string.Join(" ", rules.InvalidCharacters.ToCharArray())}";
+        if (rules.NoTrailingDot && name.EndsWith('.')) return "A file name can't end with a dot.";
+        if (rules.Length(name) > rules.MaxNameLength)
+            return rules.LengthUnit == NameLengthUnit.Utf8Bytes
+                ? $"A file name can't be longer than {rules.MaxNameLength} bytes (accented letters and symbols count as more than one)."
+                : $"A file name can't be longer than {rules.MaxNameLength} characters.";
         int dot = name.IndexOf('.');
-        if (Reserved.Contains((dot < 0 ? name : name[..dot]).TrimEnd()))
-            return $"\"{name}\" is a name Windows reserves for devices.";
+        if (rules.IsReserved((dot < 0 ? name : name[..dot]).TrimEnd()))
+            return $"\"{name}\" is a name {rules.SystemName} reserves for devices.";
         string target = Path.Combine(Path.GetDirectoryName(path) ?? "", name);
         if (!PathUtil.SamePath(target, path) && (File.Exists(target) || Directory.Exists(target)))
             return $"There is already a file named \"{name}\" in this folder.";
@@ -187,10 +214,10 @@ public static class FileRename
     /// Renames the file in its folder (never overwriting). An unchanged name does nothing and returns the same path.
     /// A change of case only goes through a temporary name, so it works however the file system treats case.
     /// </summary>
-    public static RenameResult Rename(string path, string typed)
+    public static RenameResult Rename(string path, string typed, FileNameRules? rules = null)
     {
         if (IsUnchanged(path, typed)) return new RenameResult(path, null);
-        if (Problem(path, typed) is { } problem) return new RenameResult(null, problem);
+        if (Problem(path, typed, rules) is { } problem) return new RenameResult(null, problem);
         string target = Path.Combine(Path.GetDirectoryName(path) ?? "", Clean(typed));
         try
         {

@@ -46,7 +46,11 @@ public static class SlideshowHelp
 {
     public const string Title = "Slideshow keys";
 
-    public static IReadOnlyList<IReadOnlyList<SlideshowHelpEntry>> Sections { get; } =
+    /// <summary>The help's sections, naming Windows' Recycle Bin.</summary>
+    public static IReadOnlyList<IReadOnlyList<SlideshowHelpEntry>> Sections { get; } = SectionsFor(FileDeletion.RecycleBin);
+
+    /// <summary>The help's sections, with <paramref name="trashName"/> as the place deleted files go.</summary>
+    public static IReadOnlyList<IReadOnlyList<SlideshowHelpEntry>> SectionsFor(string trashName) =>
     [
         [
             Entry(SlideshowHelpTopic.Next, "next slide", SlideshowCommand.Next, SlideshowCommand.PauseOrNext),
@@ -74,7 +78,7 @@ public static class SlideshowHelp
             Entry(SlideshowHelpTopic.Info, "cycle file info / EXIF / none", SlideshowCommand.CycleInfo),
             Entry(SlideshowHelpTopic.MoreExif, "more EXIF", SlideshowCommand.MoreExif),
             Entry(SlideshowHelpTopic.Path, "show full path", SlideshowCommand.TogglePath),
-            Entry(SlideshowHelpTopic.Delete, "move current file to the Recycle Bin", SlideshowCommand.Delete),
+            Entry(SlideshowHelpTopic.Delete, $"move current file to the {trashName}", SlideshowCommand.Delete),
             Entry(SlideshowHelpTopic.Random, "random order on / off (reshuffles when turned on)", SlideshowCommand.ToggleRandom),
             Entry(SlideshowHelpTopic.Help, "this help", SlideshowCommand.Help),
             Entry(SlideshowHelpTopic.Quit, "quit", SlideshowCommand.Quit),
@@ -86,9 +90,11 @@ public static class SlideshowHelp
     /// failing, so a forgotten entry is visible on screen instead of breaking the slideshow.
     /// </summary>
     /// <param name="footer">Mouse help and the like, after the keys.</param>
-    public static string Build(IReadOnlyDictionary<SlideshowHelpTopic, string> keys, string? footer)
+    /// <param name="trashName">What the system calls the place deleted files go.</param>
+    public static string Build(IReadOnlyDictionary<SlideshowHelpTopic, string> keys, string? footer,
+        string trashName = FileDeletion.RecycleBin)
         => KeyHelp.Format(Title,
-            Sections.Select(section => (IReadOnlyList<HelpLine>)section
+            SectionsFor(trashName).Select(section => (IReadOnlyList<HelpLine>)section
                 .Select(e => new HelpLine(keys.TryGetValue(e.Topic, out var k) ? k : "?", e.Description)).ToList()),
             footer);
 

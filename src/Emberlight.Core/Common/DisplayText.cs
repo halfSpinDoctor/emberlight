@@ -38,7 +38,8 @@ public static class DisplayText
     public static string RandomToggled(bool on)
         => on ? "Random order: ON  (reshuffled)" : "Random order: OFF  (continuing in sort order)";
 
-    public static string RecycleFailed(string? error) => "Couldn't move to the Recycle Bin:\n" + error;
+    public static string RecycleFailed(string? error, string trashName = FileDeletion.RecycleBin)
+        => $"Couldn't move to the {trashName}:\n" + error;
 
     // ---- preferences ---------------------------------------------------------------------------------
 

@@ -103,7 +103,9 @@ public sealed class PinnedFolders
     public string? ForShortcut(int number) => number is >= 1 and <= ShortcutCount && number <= _paths.Count ? _paths[number - 1] : null;
 
     /// <summary>The shortcut shown beside the pin at <paramref name="index"/>, e.g. "Ctrl+1"; null after the ninth.</summary>
-    public static string? ShortcutText(int index) => index is >= 0 and < ShortcutCount ? $"Ctrl+{index + 1}" : null;
+    /// <param name="modifier">The shortcut's modifier as the platform writes it, put before the number.</param>
+    public static string? ShortcutText(int index, string modifier = "Ctrl+")
+        => index is >= 0 and < ShortcutCount ? $"{modifier}{index + 1}" : null;
 
     /// <summary>
     /// What each pin is called, in order: the name the user gave it, exactly as given; otherwise its folder's name, or
@@ -131,8 +133,8 @@ public sealed class PinnedFolders
     }
 
     /// <summary>The pin's tooltip: its full path, and its shortcut when it has one.</summary>
-    public string ToolTip(int index)
-        => ShortcutText(index) is { } keys ? $"{_paths[index]} ({keys})" : _paths[index];
+    public string ToolTip(int index, string modifier = "Ctrl+")
+        => ShortcutText(index, modifier) is { } keys ? $"{_paths[index]} ({keys})" : _paths[index];
 
     /// <summary>A folder's own name, or a drive's or share's label when it is one.</summary>
     public static string Name(string path)

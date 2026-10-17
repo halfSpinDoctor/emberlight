@@ -85,6 +85,8 @@ internal static class BrowserTests
             T.Eq(null, PinnedFolders.ShortcutText(9));
             T.Eq($"{Root("p2")} (Ctrl+2)", pins.ToolTip(1));
             T.Eq(Root("p10"), pins.ToolTip(9), "no shortcut after the ninth");
+            T.Eq("⌘1", PinnedFolders.ShortcutText(0, "⌘"), "a platform's own modifier");
+            T.Eq($"{Root("p2")} (⌘2)", pins.ToolTip(1, "⌘"));
 
             T.True(BrowserCommands.CanRun(new BrowserInput(BrowserCommand.OpenPinned, Number: 2), 0, pinCount: 2));
             T.True(!BrowserCommands.CanRun(new BrowserInput(BrowserCommand.OpenPinned, Number: 3), 0, pinCount: 2),

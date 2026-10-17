@@ -141,6 +141,7 @@ internal static class FlowTests
             T.Eq("Random order: ON  (reshuffled)", DisplayText.RandomToggled(true));
             T.Eq("Random order: OFF  (continuing in sort order)", DisplayText.RandomToggled(false));
             T.Eq("Couldn't move to the Recycle Bin:\naccess denied", DisplayText.RecycleFailed("access denied"));
+            T.Eq("Couldn't move to the Trash:\naccess denied", DisplayText.RecycleFailed("access denied", "Trash"));
         });
 
         T.Run("preferences saved, or not", () =>

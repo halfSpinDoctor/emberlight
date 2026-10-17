@@ -617,8 +617,9 @@ The folders pinned above the folder tree (`PinnedFolders`), with made-up paths: 
 - **pins go at the bottom, once each; saved lists lose blanks and repeats**: Pinning the same folder again (with a
   trailing separator, or other case on Windows) or a blank does nothing; a saved list keeps its first copy of each.
 - **unpinning and moving up and down, stopping at the ends**: The top pin can't go up, the bottom one can't go down.
-- **Ctrl+1 to Ctrl+9 open the first nine pins**: Which pin each number opens, the "Ctrl+N" text, tooltips with and
-  without a shortcut, and the key is left alone when there is no such pin.
+- **Ctrl+1 to Ctrl+9 open the first nine pins**: Which pin each number opens, the "Ctrl+N" text (or another
+  platform's modifier, such as the Mac's command sign), tooltips with and without a shortcut, and the key is left
+  alone when there is no such pin.
 - **labels are folder names, with the parent added when two match**: "2024 (Holidays)"; if the parent's name matches
   too, the full path. On Windows, a drive keeps its root path and a share is labelled as in the tree.
 - **pin command text and messages**: Pin or Unpin, depending on whether the folder is pinned.
@@ -716,6 +717,7 @@ The browser's Delete command, with a fake Recycle Bin.
 
 - **every delete asks first, naming the file when there is one**: The exact question for one file, the count for
   several, and no question when there is nothing to delete.
+- **the question names the trash as the platform calls it**: "the Trash" when a front end passes that name.
 - **deletes each file, reports each one that went, and keeps the first error**: Every file is tried in order; the
   failure line names the count and the first error, and there is none when everything went.
 - **afterwards the item at the old position is selected, or the last one**: And nothing when the list is empty.
@@ -728,6 +730,10 @@ The browser's Rename command, on real files.
 - **names Windows won't accept are explained, good ones pass**: Spaces at the ends are dropped; the unchanged name and
   a change of case are fine; empty names, forbidden characters (and control characters), a trailing dot, over 255
   characters and reserved device names (`CON`, `nul`, `COM1`, `lpt9.old`, `aux .jpg`) are refused with a reason.
+- **another file system's rules can be passed instead of Windows'**: With looser rules (only `/` and `:` forbidden,
+  no reserved names, trailing dots allowed, 255 UTF-8 bytes) `CON.jpg`, `b.` and `x*y?.jpg` pass, `:` is refused,
+  control characters still are, and the length counts bytes (125 accented letters plus `.jpg` pass, 126 don't).
+  Rename refuses with the same rules and leaves the file alone; without rules, Windows' still apply.
 - **a name already taken in the folder is refused**: By a file or a subfolder.
 - **changing the extension asks first, and says when the file will leave the grid**: No question when only the
   extension's case changes; the exact question for a change, and the wording for removing or adding one.
@@ -820,6 +826,8 @@ The slideshow help screen (`KeyHelp`, `SlideshowHelp`); the Windows key names ar
 - **topics are listed once each, and each has a description**.
 - **the page size in the help follows the command's page size**: "back / forward 10 slides" comes from `PageSize`.
 - **building the help uses the platform's key names, in topic order**: Title first, footer last, every description in.
+- **the help names the trash as the platform calls it**: "Recycle Bin" by default; "Trash" (and no Recycle Bin)
+  when passed.
 - **a topic without key names shows a question mark instead of failing**.
 
 ### FolderJumper
@@ -866,7 +874,8 @@ The browser following a slideshow's folder jumps (`SlideshowFollow`).
 ### DisplayText (messages)
 - **loading a folder: scanning, sorting or preparing, then loading**: "Sorting" only when the order opens every file.
 - **window titles: the folder or picture, then the app's name**.
-- **slideshow messages**: End of show, couldn't open, random order on/off, Recycle Bin failure.
+- **slideshow messages**: End of show, couldn't open, random order on/off, Recycle Bin failure (and the
+  same with another name for the trash).
 - **preferences saved, or not**.
 
 ### Startup plan

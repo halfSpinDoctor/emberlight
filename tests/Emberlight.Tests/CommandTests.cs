@@ -89,6 +89,14 @@ internal static class CommandTests
                 T.True(text.Contains(topic.Description), topic.Description);
         });
 
+        T.Run("the help names the trash as the platform calls it", () =>
+        {
+            var keys = Enum.GetValues<SlideshowHelpTopic>().ToDictionary(t => t, t => "k");
+            T.True(SlideshowHelp.Build(keys, null).Contains("move current file to the Recycle Bin"), "Windows by default");
+            string mac = SlideshowHelp.Build(keys, null, "Trash");
+            T.True(mac.Contains("move current file to the Trash") && !mac.Contains("Recycle Bin"), mac);
+        });
+
         T.Run("a topic without key names shows a question mark instead of failing", () =>
         {
             string text = SlideshowHelp.Build(new Dictionary<SlideshowHelpTopic, string>(), null);

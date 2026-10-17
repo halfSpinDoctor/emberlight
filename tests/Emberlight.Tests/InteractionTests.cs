@@ -533,6 +533,15 @@ internal static class InteractionTests
             T.Eq(null, FileDeletion.ConfirmationText([]), "nothing to delete, nothing to ask");
         });
 
+        T.Run("the question names the trash as the platform calls it", () =>
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "phx-del");
+            T.Eq("Are you sure you want to send \"beach.jpg\" to the Trash?",
+                FileDeletion.ConfirmationText([Path.Combine(dir, "beach.jpg")], "Trash"));
+            T.Eq("Are you sure you want to send these 2 files to the Trash?",
+                FileDeletion.ConfirmationText([Path.Combine(dir, "a.jpg"), Path.Combine(dir, "b.jpg")], "Trash"));
+        });
+
         T.Run("deletes each file, reports each one that went, and keeps the first error", () =>
         {
             var bin = new FakeBin("b", "d");
@@ -578,13 +587,32 @@ internal static class InteractionTests
             T.Eq(null, FileRename.Problem(a, "A.JPG"), "a change of case is allowed");
             T.Eq(null, FileRename.Problem(a, "console.jpg"), "only exact device names are reserved");
             T.Eq("Type a name for the file.", FileRename.Problem(a, "   "));
-            foreach (char c in FileRename.InvalidCharacters + "\t")
+            foreach (char c in FileNameRules.Windows.InvalidCharacters + "\t")
                 T.True(FileRename.Problem(a, $"x{c}y.jpg")?.StartsWith("A file name can't contain") == true, $"char {(int)c}");
             T.Eq("A file name can't end with a dot.", FileRename.Problem(a, "b."));
             T.True(FileRename.Problem(a, new string('x', 252) + ".jpg") != null, "256 characters is too long");
             T.Eq(null, FileRename.Problem(a, new string('x', 251) + ".jpg"), "255 is fine");
             foreach (string reserved in new[] { "CON.jpg", "nul", "Com1.tif", "lpt9.old.jpg", "aux .jpg" })
                 T.True(FileRename.Problem(a, reserved)?.Contains("reserves") == true, reserved);
+        });
+
+        T.Run("another file system's rules can be passed instead of Windows'", () =>
+        {
+            using var d = new TempDir();
+            string a = d.Write("a.jpg", new byte[1]);
+            var loose = new FileNameRules("/:", [], NoTrailingDot: false, MaxNameLength: 255, NameLengthUnit.Utf8Bytes, "Other");
+            T.Eq(null, FileRename.Problem(a, "CON.jpg", loose), "no reserved names");
+            T.Eq(null, FileRename.Problem(a, "b.", loose), "a trailing dot is allowed");
+            T.Eq(null, FileRename.Problem(a, "x*y?.jpg", loose), "only its own characters are refused");
+            T.Eq("A file name can't contain any of these characters: / :", FileRename.Problem(a, "x:y.jpg", loose));
+            T.True(FileRename.Problem(a, "x\ty.jpg", loose) != null, "control characters are always refused");
+            T.Eq(null, FileRename.Problem(a, new string('é', 125) + ".jpg", loose), "254 bytes is fine");
+            T.True(FileRename.Problem(a, new string('é', 126) + ".jpg", loose)?.Contains("255 bytes") == true,
+                "counted in UTF-8 bytes: 256 is too long though it's only 130 characters");
+            T.Eq("A file name can't contain any of these characters: / :", FileRename.Rename(a, "x:y.jpg", loose).Error,
+                "Rename checks with the same rules");
+            T.True(File.Exists(a), "and leaves the file alone");
+            T.True(FileRename.Problem(a, "CON.jpg") != null, "Windows' rules are still the default");
         });
 
         T.Run("a name already taken in the folder is refused", () =>
