@@ -835,7 +835,7 @@ public partial class MainWindow : Window
 
         var selected = SelectedItems();
         StatusText.Text = DisplayText.Resorting;
-        await _listing.SortAsync();
+        if (!await _listing.SortAsync()) return;     // superseded by a newer sort or folder: that one finishes the job
 
         // Indices just moved, so any item might now be far from the viewport: treat everything as possibly
         // loaded and let the next update release whatever falls outside the window.

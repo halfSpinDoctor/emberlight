@@ -584,6 +584,27 @@ internal static class BrowserTests
             Consistent(l, items);
         });
 
+        T.Run("overlapping sorts: the latest request decides the order; replacing the list drops a pending sort", () =>
+        {
+            var items = new List<Item>();
+            var l = Listing(items);
+            l.Populate([P("a.jpg"), P("b.jpg"), P("c.jpg")]);
+            l.SetOrder(new SortOrder(SortField.Name, true));
+            var first = l.SortAsync();
+            l.SetOrder(new SortOrder(SortField.Name, false));
+            var second = l.SortAsync();
+            bool firstApplied = first.GetAwaiter().GetResult(), secondApplied = second.GetAwaiter().GetResult();
+            T.True(secondApplied, "the newest request is applied");
+            T.SeqEq(["a.jpg", "b.jpg", "c.jpg"], Names(items), "ascending, as the last request asked (the older descending sort never wins)");
+            T.True(!(firstApplied && !secondApplied));
+
+            l.SetOrder(new SortOrder(SortField.Name, true));
+            var pending = l.SortAsync();
+            l.Populate([P("x.jpg"), P("y.jpg")]);           // a new folder replaces the list
+            T.True(!pending.GetAwaiter().GetResult(), "a sort of the old list is not applied");
+            T.SeqEq(["x.jpg", "y.jpg"], Names(items));
+        });
+
         T.Run("a file that arrives while sorting is kept, at its sorted place", () =>
         {
             var items = new List<Item>();

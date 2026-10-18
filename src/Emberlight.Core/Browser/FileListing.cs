@@ -80,6 +80,7 @@ public sealed class FileListing<TItem> where TItem : class
     /// <summary>Shows exactly these files, which must already be in <see cref="Order"/>.</summary>
     public void Populate(IEnumerable<string> sortedPaths)
     {
+        NewSortRequest(out _);
         _byPath.Clear();
         var items = new List<TItem>();
         foreach (var path in sortedPaths)
@@ -93,6 +94,7 @@ public sealed class FileListing<TItem> where TItem : class
 
     public void Clear()
     {
+        NewSortRequest(out _);   // a sort of the old list is moot
         _byPath.Clear();
         _replaceAll(Array.Empty<TItem>());
     }
@@ -127,17 +129,37 @@ public sealed class FileListing<TItem> where TItem : class
         return UpsertResult.Added;
     }
 
+    private int _sortVersion;
+    private CancellationTokenSource? _sortCts;
+
+    /// <summary>Stops a sort that is still running, and makes it report "not applied". Used when the list is
+    /// replaced, and by the next <see cref="SortAsync"/>.</summary>
+    private CancellationToken NewSortRequest(out int version)
+    {
+        _sortCts?.Cancel();
+        _sortCts = new CancellationTokenSource();
+        version = ++_sortVersion;
+        return _sortCts.Token;
+    }
+
     /// <summary>
     /// Re-sorts the list in <see cref="Order"/>. The sorting runs on a worker thread (by date or EXIF date it opens every
-    /// file); the list itself is only touched by the caller's thread, after the await.
+    /// file); the list itself is only touched by the caller's thread, after the await. A newer request (another
+    /// <see cref="SortAsync"/>, or the list being replaced) supersedes this one: the older sort stops, and the latest
+    /// request is always the one that decides the final order. Returns true if this sort was applied, false if it
+    /// was superseded (whoever superseded it is responsible for what happens next).
     /// </summary>
-    public async Task SortAsync()
+    public async Task<bool> SortAsync()
     {
-        if (_items.Count == 0) return;
+        if (_items.Count == 0) return false;
+        var ct = NewSortRequest(out int version);
         var paths = SnapshotPaths();
         var sorter = CaptureSorter();
-        await Task.Run(() => sorter(paths, default));
+        try { await Task.Run(() => sorter(paths, ct)); }
+        catch (OperationCanceledException) { return false; }
+        if (version != _sortVersion) return false;
         ApplyOrder(paths);
+        return true;
     }
 
     /// <summary>

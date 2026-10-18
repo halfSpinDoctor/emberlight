@@ -515,6 +515,9 @@ list of stand-in items where the app uses the grid's observable collection.
   removing twice or an unknown file does nothing.
 - **set order swaps the comparer; sort re-orders the same item objects**: Changing the order alone moves nothing;
   sorting then re-orders the existing items.
+- **overlapping sorts: the latest request decides the order; replacing the list drops a pending sort**: Two sorts
+  started back to back end in the order the second asked for, and `SortAsync` reports false (not applied) when the
+  list is replaced by another folder before it finishes.
 - **a file that arrives while sorting is kept, at its sorted place**: A file added between taking the snapshot and
   applying the sorted order isn't lost (the old browser code dropped it from the grid).
 - **a file removed while sorting stays removed**: Applying a sorted order made before a removal doesn't bring the file
