@@ -130,6 +130,17 @@ internal static class FileTests
             T.SeqEq(new[] { "a.jpg", "b.PNG", "e.tif" }, s.Scan(d.Path, true).Select(Path.GetFileName).OrderBy(x => x));
         });
 
+        T.Run("skips dot files and dot folders on macOS/Linux", () =>
+        {
+            if (OperatingSystem.IsWindows()) return;   // Windows uses the Hidden attribute instead
+            using var d = new TempDir();
+            d.Write("a.jpg", new byte[1]); d.Write(".hidden.jpg", new byte[1]);
+            d.Write(".cache/b.jpg", new byte[1]); d.Write("sub/c.jpg", new byte[1]);
+            var s = new DirectoryScanner(new ImageFileTypes());
+            T.SeqEq(new[] { "a.jpg", "c.jpg" }, s.Scan(d.Path, true).Select(Path.GetFileName).OrderBy(x => x));
+            T.True(s.HasAnyImage(d.Path, false), "HasAnyImage sees a.jpg");
+        });
+
         T.Run("honours disabled types and returns sorted results", () =>
         {
             using var d = new TempDir();

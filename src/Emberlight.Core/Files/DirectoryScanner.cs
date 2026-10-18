@@ -1,3 +1,5 @@
+using System.IO.Enumeration;
+
 namespace Emberlight.Core;
 
 /// <summary>Finds the image files to display for a folder.</summary>
@@ -24,6 +26,38 @@ public sealed class DirectoryScanner
         }
     }
 
+    /// <summary>
+    /// Every non-hidden file under <paramref name="directory"/>. Windows hands over each entry's attributes for
+    /// free, so it uses .NET's attribute filter. Elsewhere that filter makes .NET stat every single entry (a
+    /// network round trip each on an SMB share: 3,098 files took 327 s cold and 27 s warm, against 5 ms without),
+    /// so the Unix path skips the attribute check and treats a leading '.' as hidden, which is all .NET's own
+    /// Unix "Hidden" means anyway.
+    /// </summary>
+    private static IEnumerable<string> EnumerateFiles(string directory, bool includeSubfolders)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return Directory.EnumerateFiles(directory, "*", new EnumerationOptions
+            {
+                RecurseSubdirectories = includeSubfolders,
+                IgnoreInaccessible = true,
+                AttributesToSkip = FileAttributes.Hidden | FileAttributes.System,
+                ReturnSpecialDirectories = false,
+            });
+        }
+        return new FileSystemEnumerable<string>(directory, (ref FileSystemEntry e) => e.ToFullPath(), new EnumerationOptions
+        {
+            RecurseSubdirectories = includeSubfolders,
+            IgnoreInaccessible = true,
+            AttributesToSkip = 0,
+            ReturnSpecialDirectories = false,
+        })
+        {
+            ShouldIncludePredicate = (ref FileSystemEntry e) => !e.IsDirectory && e.FileName[0] != '.',
+            ShouldRecursePredicate = (ref FileSystemEntry e) => e.FileName[0] != '.',
+        };
+    }
+
     /// <summary>How often (in files found) <see cref="Scan"/> reports progress.</summary>
     public const int ProgressInterval = 250;
 
@@ -32,14 +66,7 @@ public sealed class DirectoryScanner
     {
         var results = new List<string>();
         if (!Directory.Exists(directory)) return results;
-        var options = new EnumerationOptions
-        {
-            RecurseSubdirectories = includeSubfolders,
-            IgnoreInaccessible = true,
-            AttributesToSkip = FileAttributes.Hidden | FileAttributes.System,
-            ReturnSpecialDirectories = false,
-        };
-        foreach (var path in Directory.EnumerateFiles(directory, "*", options))
+        foreach (var path in EnumerateFiles(directory, includeSubfolders))
         {
             ct.ThrowIfCancellationRequested();
             string name = Path.GetFileName(path);
@@ -57,14 +84,7 @@ public sealed class DirectoryScanner
     public bool HasAnyImage(string directory, bool includeSubfolders, CancellationToken ct = default)
     {
         if (!Directory.Exists(directory)) return false;
-        var options = new EnumerationOptions
-        {
-            RecurseSubdirectories = includeSubfolders,
-            IgnoreInaccessible = true,
-            AttributesToSkip = FileAttributes.Hidden | FileAttributes.System,
-            ReturnSpecialDirectories = false,
-        };
-        foreach (var path in Directory.EnumerateFiles(directory, "*", options))
+        foreach (var path in EnumerateFiles(directory, includeSubfolders))
         {
             ct.ThrowIfCancellationRequested();
             if (Path.GetFileName(path).StartsWith("._", StringComparison.Ordinal)) continue;

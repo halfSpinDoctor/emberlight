@@ -172,6 +172,9 @@ Emberlight's own TIFF/EXIF parser, including the lossless orientation rewrite us
 ### DirectoryScanner
 - **finds supported files, skips others and macOS companion files**: Finds image files, skips other files and macOS
   `._` companion files, and looks in subfolders only when asked.
+- **skips dot files and dot folders on macOS/Linux**: Files and folders whose name starts with `.` are left out
+  (the Unix scan treats them as hidden without checking attributes, which is slow on network shares); skipped on
+  Windows, which uses the Hidden attribute.
 - **honours disabled types and returns sorted results**: Leaves out disabled file types, and `ScanSorted` returns
   the files in the requested order.
 - **missing directory yields an empty list; cancellation is honoured**: A missing folder gives an empty list, and a
