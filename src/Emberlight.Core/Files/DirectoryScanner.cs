@@ -96,7 +96,9 @@ public sealed class DirectoryScanner
     public List<string> ScanSorted(string directory, bool includeSubfolders, SortOrder order,
         FileMetadataCache? cache = null, CancellationToken ct = default, IProgress<int>? progress = null)
     {
+        cache ??= new FileMetadataCache();
         var list = Scan(directory, includeSubfolders, ct, progress);
+        cache.Prefetch(list, order.Key, ct);
         list.Sort(FileComparers.For(order, cache));
         return list;
     }

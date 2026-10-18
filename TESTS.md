@@ -164,6 +164,11 @@ Emberlight's own TIFF/EXIF parser, including the lossless orientation rewrite us
   modified dates suggest a different order.
 - **metadata cache: sorting uses cached values until invalidated**: Sorting uses cached sizes and dates until a
   file's cache entry is cleared, then picks up the new value.
+- **metadata cache: Prefetch reads every file up front, in parallel, for the sorts that need it**: After `Prefetch`
+  for Size, Date Modified, Date Added or EXIF Date, sorting gives the same order as without it even when the files
+  are deleted before the sort starts, proving the values came from the cache.
+- **FileListing.CaptureSorter sorts paths in the order it was captured with**: A sorter taken from a listing keeps
+  sorting by the order that was current when it was captured, even if the order changes afterwards.
 - **missing files never throw; they fall back to name order**: For every sort field, files that don't exist compare
   by name instead of throwing.
 - **comparers are consistent (antisymmetric) for a mixed folder**: For every sort field, comparing A to B always

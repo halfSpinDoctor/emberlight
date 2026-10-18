@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace Emberlight.Core;
 
 /// <summary>
@@ -16,34 +18,34 @@ public sealed class FileMetadataCache
         public DateTime? SortDate;
     }
 
-    private readonly Dictionary<string, Entry> _entries = new(PathUtil.Comparer);
-    private readonly object _lock = new();
+    private readonly ConcurrentDictionary<string, Entry> _entries = new(PathUtil.Comparer);
 
-    public void Invalidate(string path) { lock (_lock) _entries.Remove(path); }
-    public void Clear() { lock (_lock) _entries.Clear(); }
+    /// <summary>How many files <see cref="Prefetch"/> examines at once. Reading a file's dates or EXIF on a network
+    /// share is mostly waiting for the server, so overlapping the waits is what makes it fast.</summary>
+    public const int PrefetchParallelism = 16;
 
-    private Entry Get(string path)
+    public void Invalidate(string path) => _entries.TryRemove(path, out _);
+    public void Clear() => _entries.Clear();
+
+    // The file-system read happens outside any lock (GetOrAdd may run it twice for one path in a race, harmlessly),
+    // so several threads can be waiting on the disk or network at the same time.
+    private Entry Get(string path) => _entries.GetOrAdd(path, static p =>
     {
-        lock (_lock)
+        var e = new Entry();
+        try
         {
-            if (_entries.TryGetValue(path, out var e)) return e;
-            e = new Entry();
-            try
+            var fi = new FileInfo(p);
+            if (fi.Exists)
             {
-                var fi = new FileInfo(path);
-                if (fi.Exists)
-                {
-                    e.StatOk = true;
-                    e.LastWriteUtc = fi.LastWriteTimeUtc;
-                    e.CreatedLocal = fi.CreationTime;
-                    e.Length = fi.Length;
-                }
+                e.StatOk = true;
+                e.LastWriteUtc = fi.LastWriteTimeUtc;
+                e.CreatedLocal = fi.CreationTime;
+                e.Length = fi.Length;
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-            _entries[path] = e;
-            return e;
         }
-    }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return e;
+    });
 
     public bool TryGetLastWrite(string path, out DateTime utc) { var e = Get(path); utc = e.LastWriteUtc; return e.StatOk; }
     public bool TryGetCreated(string path, out DateTime local) { var e = Get(path); local = e.CreatedLocal; return e.StatOk; }
@@ -53,7 +55,7 @@ public sealed class FileMetadataCache
     public bool TryGetSortDate(string path, out DateTime date)
     {
         var e = Get(path);
-        lock (_lock)
+        lock (e)   // per file: other files' EXIF reads aren't held up
         {
             if (!e.ExifResolved)
             {
@@ -65,6 +67,19 @@ public sealed class FileMetadataCache
             date = e.SortDate ?? default;
             return e.SortDate.HasValue;
         }
+    }
+
+    /// <summary>
+    /// Reads what sorting by <paramref name="field"/> needs for every file, <see cref="PrefetchParallelism"/> at a
+    /// time, so the sort itself then finds it all in the cache. Does nothing for the sorts that only look at names.
+    /// </summary>
+    public void Prefetch(IReadOnlyList<string> paths, SortField field, CancellationToken ct = default)
+    {
+        if (field is SortField.Name or SortField.FilePath or SortField.Type) return;
+        Parallel.ForEach(paths, new ParallelOptions { MaxDegreeOfParallelism = PrefetchParallelism, CancellationToken = ct }, path =>
+        {
+            if (field == SortField.ExifDate) TryGetSortDate(path, out _); else Get(path);
+        });
     }
 }
 

@@ -135,9 +135,26 @@ public sealed class FileListing<TItem> where TItem : class
     {
         if (_items.Count == 0) return;
         var paths = SnapshotPaths();
-        var comparer = Comparer;
-        await Task.Run(() => paths.Sort(comparer));
+        var sorter = CaptureSorter();
+        await Task.Run(() => sorter(paths, default));
         ApplyOrder(paths);
+    }
+
+    /// <summary>
+    /// A function that sorts a list of paths in the current <see cref="Order"/>, reading the files' dates or sizes
+    /// in parallel first (<see cref="FileMetadataCache.Prefetch"/>). Take it on the calling thread, then run it
+    /// on a worker: it keeps using the order and cache it was created with, even if those change meanwhile.
+    /// </summary>
+    public Action<List<string>, CancellationToken> CaptureSorter()
+    {
+        var comparer = Comparer;
+        var meta = _meta;
+        var field = Order.Key;
+        return (paths, ct) =>
+        {
+            meta.Prefetch(paths, field, ct);
+            paths.Sort(comparer);
+        };
     }
 
     /// <summary>The listed paths in their current order (a copy, so it can be sorted on another thread).</summary>

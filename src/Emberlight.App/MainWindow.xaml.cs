@@ -494,7 +494,7 @@ public partial class MainWindow : Window
             BeginBusy(DisplayText.ScanStarted);
         }
 
-        var comparer = _listing.Comparer;
+        var sortFiles = _listing.CaptureSorter();
         bool recurse = _settings.IncludeSubfolders;
         // Progress<T> captures the UI context, so this callback runs on the UI thread.
         var scanProgress = new Progress<int>(n =>
@@ -510,7 +510,7 @@ public partial class MainWindow : Window
 
             // Sorting by a file-system or EXIF date has to open every file, which can take a while.
             if (IsBusyShown) BeginBusy(DisplayText.Sorting(files.Count, _listing.Order));
-            await Task.Run(() => files.Sort(comparer), ct);
+            await Task.Run(() => sortFiles(files, ct), ct);
         }
         catch (OperationCanceledException) { return; }      // a newer navigation owns the status bar now
         catch (Exception ex)

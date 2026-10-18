@@ -92,6 +92,35 @@ internal static class FileTests
             T.True(cmp.Compare(a, b) < 0, "after Invalidate the new size is seen");
         });
 
+        T.Run("metadata cache: Prefetch reads every file up front, in parallel, for the sorts that need it", () =>
+        {
+            using var d = new TempDir();
+            var paths = new List<string>();
+            for (int i = 0; i < 60; i++) paths.Add(d.Write($"f{i:D2}.jpg", new byte[(i * 37) % 61 + 1]));
+            foreach (var field in new[] { SortField.Size, SortField.DateModified, SortField.DateAdded, SortField.ExifDate })
+            {
+                var cache = new FileMetadataCache();
+                cache.Prefetch(paths, field);
+                var expected = paths.ToList(); expected.Sort(FileComparers.For(new SortOrder(field, false), new FileMetadataCache()));
+                foreach (var p in paths) File.Delete(p);              // sorting now has to come from the cache alone
+                var got = paths.ToList(); got.Sort(FileComparers.For(new SortOrder(field, false), cache));
+                T.SeqEq(expected, got);
+                foreach (var p in paths) d.Write(Path.GetFileName(p), new byte[(Path.GetFileName(p).GetHashCode() & 31) + 1]);
+            }
+        });
+
+        T.Run("FileListing.CaptureSorter sorts paths in the order it was captured with", () =>
+        {
+            using var d = new TempDir();
+            var a = d.Write("a.jpg", new byte[100]); var b = d.Write("b.jpg", new byte[50]); var c = d.Write("c.jpg", new byte[70]);
+            var listing = new FileListing<string>(new List<string>(), p => p, p => p, new SortOrder(SortField.Size, false));
+            var sorter = listing.CaptureSorter();
+            listing.SetOrder(new SortOrder(SortField.Name, false));   // changing the order later must not affect it
+            var list = new List<string> { a, b, c };
+            sorter(list, default);
+            T.SeqEq(new[] { b, c, a }, list);
+        });
+
         T.Run("missing files never throw; they fall back to name order", () =>
         {
             using var d = new TempDir();
