@@ -40,6 +40,7 @@ public partial class MainWindow : Window
     private string? _pendingSelectPath;
     private readonly DispatcherTimer _followTimer = new() { Interval = SlideshowFollow.Delay };
     private readonly SlideshowFollow _follow = new();   // the browser follows a slideshow's folder jumps after a short pause
+    private int _openVersion;              // bumped per File > Open / drop; only the latest one goes ahead
     private int _infoPanelVersion;         // bumped per info-panel update; stale background results are dropped
     private bool _isLoading;               // a folder navigation is in progress
     private int _keepFirst, _keepEnd;     // items in [_keepFirst, _keepEnd) may hold a decoded thumbnail
@@ -1253,18 +1254,26 @@ public partial class MainWindow : Window
     // Menu: file operations
     // ===============================================================================================
 
-    private void OnOpenFolder(object sender, RoutedEventArgs e)
+    private async void OnOpenFolder(object sender, RoutedEventArgs e)
     {
         var dlg = new OpenFolderDialog { Title = "Choose a folder of images" };
         if (_currentFolder != null) dlg.InitialDirectory = _currentFolder;
-        if (dlg.ShowDialog(this) == true) OpenFolder(dlg.FolderName);
+        if (dlg.ShowDialog(this) == true) await OpenFolderAsync(dlg.FolderName);
     }
 
-    private void OpenFolder(string path)
+    /// <summary>
+    /// Opens the folder if it exists. Whether it exists is asked on a worker thread: it may be on a share that isn't
+    /// connected, which can take a while to answer. Returns whether it was opened (false if it's missing, or if
+    /// another folder was opened meanwhile).
+    /// </summary>
+    private async Task<bool> OpenFolderAsync(string path, string? selectWhenLoaded = null)
     {
-        if (!Directory.Exists(path)) return;
+        int version = ++_openVersion;
+        if (!await Task.Run(() => Directory.Exists(path)) || version != _openVersion) return false;
+        if (selectWhenLoaded != null) _pendingSelectPath = selectWhenLoaded;
         SelectPathInTree(path);
         NavigateTo(path);
+        return true;
     }
 
     private void OnExit(object sender, RoutedEventArgs e) => Close();
@@ -1451,16 +1460,15 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void OnDrop(object sender, DragEventArgs e)
+    private async void OnDrop(object sender, DragEventArgs e)
     {
         if (e.Data.GetData(DataFormats.FileDrop) is not string[] dropped || dropped.Length == 0) return;
         string first = dropped[0];
-        if (Directory.Exists(first)) { OpenFolder(first); return; }
-        if (File.Exists(first) && Path.GetDirectoryName(first) is { } dir)
-        {
-            _pendingSelectPath = first;
-            OpenFolder(dir);
-        }
+        // A folder opens as is; a file opens its folder with the file selected. Both questions go to a worker.
+        bool isFolder = await Task.Run(() => Directory.Exists(first));
+        if (isFolder) { await OpenFolderAsync(first); return; }
+        if (Path.GetDirectoryName(first) is { } dir && await Task.Run(() => File.Exists(first)))
+            await OpenFolderAsync(dir, selectWhenLoaded: first);
     }
 
     // ===============================================================================================
