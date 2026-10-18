@@ -40,6 +40,7 @@ public partial class MainWindow : Window
     private string? _pendingSelectPath;
     private readonly DispatcherTimer _followTimer = new() { Interval = SlideshowFollow.Delay };
     private readonly SlideshowFollow _follow = new();   // the browser follows a slideshow's folder jumps after a short pause
+    private int _infoPanelVersion;         // bumped per info-panel update; stale background results are dropped
     private bool _isLoading;               // a folder navigation is in progress
     private int _keepFirst, _keepEnd;     // items in [_keepFirst, _keepEnd) may hold a decoded thumbnail
     private CancellationTokenSource? _scanCts;
@@ -749,20 +750,33 @@ public partial class MainWindow : Window
         StatusText.Text = DisplayText.BrowserStatus(_items.Count, sel.Count, one?.FileName, one?.Info);
     }
 
+    /// <summary>Reading the image's size and EXIF is disk I/O (slow on a network share), so it runs on a worker
+    /// thread; a result that arrives after the selection has changed again is dropped.</summary>
     private void UpdateInfoPanel()
     {
         if (InfoPanel.Visibility != Visibility.Visible) return;
+        int version = ++_infoPanelVersion;
         var sel = SelectedItems();
-        InfoHeader.Text = DisplayText.InfoPanelHeader(sel.Count, sel.Count == 1 ? sel[0].FileName : null);
+        string header = DisplayText.InfoPanelHeader(sel.Count, sel.Count == 1 ? sel[0].FileName : null);
         if (sel.Count != 1)
         {
+            InfoHeader.Text = header;
             InfoBody.Text = "";
             return;
         }
 
         string path = sel[0].Path;
-        (int, int)? pixelSize = ImageService.TryReadSize(path, out int w, out int h) ? (w, h) : null;
-        InfoBody.Text = DisplayText.InfoPanelBody(path, pixelSize, _settings.InfoPanelMoreExif);
+        bool moreExif = _settings.InfoPanelMoreExif;
+        _ = Task.Run(() =>
+        {
+            (int, int)? pixelSize = ImageService.TryReadSize(path, out int w, out int h) ? (w, h) : null;
+            return DisplayText.InfoPanelBody(path, pixelSize, moreExif);
+        }).ContinueWith(t =>
+        {
+            if (version != _infoPanelVersion) return;
+            InfoHeader.Text = header;
+            InfoBody.Text = t.IsCompletedSuccessfully ? t.Result : "";
+        }, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
     private void SetInfoPanelVisible(bool visible)
