@@ -71,10 +71,11 @@ public partial class PreferencesWindow : Window
         }
     }
 
-    private void OnBrowsePictures(object sender, RoutedEventArgs e)
+    private async void OnBrowsePictures(object sender, RoutedEventArgs e)
     {
         var dlg = new OpenFolderDialog { Title = "Choose the startup folder" };
-        if (Directory.Exists(PicturesPath.Text)) dlg.InitialDirectory = PicturesPath.Text;
+        string typed = PicturesPath.Text;
+        if (await Task.Run(() => Directory.Exists(typed))) dlg.InitialDirectory = typed;   // off the UI thread: may be a dead share
         if (dlg.ShowDialog(this) == true)
         {
             PicturesPath.Text = dlg.FolderName;

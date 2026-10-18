@@ -45,10 +45,16 @@ public sealed class FolderJumper
     internal FolderJumper(string? startFolder, Func<string, int, SiblingFolder?> find)
     {
         _find = find;
-        Anchor = !string.IsNullOrWhiteSpace(startFolder) && Directory.Exists(startFolder) ? startFolder : null;
+        // Whether the start folder still exists is checked at the first jump, on a worker thread: the constructor
+        // runs on the UI thread as the slideshow opens, and the folder may be on a share that has dropped.
+        Anchor = string.IsNullOrWhiteSpace(startFolder) ? null : startFolder;
+        _anchorUnchecked = Anchor != null;
     }
 
-    /// <summary>The folder jumps are currently relative to, if any.</summary>
+    private bool _anchorUnchecked;
+
+    /// <summary>The folder jumps are currently relative to, if any (the start folder counts until the first jump
+    /// finds it missing).</summary>
     public string? Anchor { get; private set; }
 
     /// <summary>A search is under way.</summary>
@@ -64,15 +70,22 @@ public sealed class FolderJumper
     public async Task<FolderJumpResult> JumpAsync(int direction, string? currentSlide, Action<string>? searching = null)
     {
         if (IsBusy) return new FolderJumpResult(FolderJumpOutcome.Busy, null, null);
-        string? folder = FolderNavigator.ResolveReferenceFolder(Anchor, currentSlide, out var anchor);
-        Anchor = anchor;
-        if (folder == null) return new FolderJumpResult(FolderJumpOutcome.NoFolder, null, null);
-
         IsBusy = true;
-        searching?.Invoke(SearchingText(direction));
         SiblingFolder? target;
+        string? folder;
         try
         {
+            if (_anchorUnchecked)
+            {
+                _anchorUnchecked = false;
+                string? start = Anchor;
+                if (start != null && !await Task.Run(() => Directory.Exists(start))) Anchor = null;
+            }
+            folder = FolderNavigator.ResolveReferenceFolder(Anchor, currentSlide, out var anchor);
+            Anchor = anchor;
+            if (folder == null) return new FolderJumpResult(FolderJumpOutcome.NoFolder, null, null);
+
+            searching?.Invoke(SearchingText(direction));
             target = await Task.Run(() => _find(folder, direction));
         }
         catch (Exception)

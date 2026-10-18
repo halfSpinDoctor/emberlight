@@ -91,7 +91,7 @@ public partial class MainWindow : Window
         SyncMenuState();
         RebuildPins();
 
-        _followTimer.Tick += (_, _) => FlushFolderFollow();
+        _followTimer.Tick += async (_, _) => await FlushFolderFollowAsync();
         _drivePoll.Tick += OnDrivePoll;
         Loaded += OnLoaded;
         Closing += OnClosing;
@@ -882,9 +882,9 @@ public partial class MainWindow : Window
     {
         var show = new SlideshowWindow(_settings, files, start, _listing.Order, _scanner, includeSubfolders, startFolder, fullScreen);
         show.FolderJumped += OnSlideshowFolderJumped;
-        show.Closed += (_, _) =>
+        show.Closed += async (_, _) =>
         {
-            FlushFolderFollow();       // if the browser hasn't caught up with the last jump yet, do it now
+            await FlushFolderFollowAsync();    // if the browser hasn't caught up with the last jump yet, do it now
             string? last = show.LastShownPath;
             ThumbnailItem? item = null;
             switch (SlideshowFollow.AfterClose(last, last != null && _listing.TryGet(last, out item), _isLoading))
@@ -913,15 +913,19 @@ public partial class MainWindow : Window
         _followTimer.Start();
     }
 
-    private void FlushFolderFollow()
+    /// <summary>Whether the folder still exists is asked on a worker thread (it may be on a share that has dropped).
+    /// Awaited when the slideshow closes, so the folder is loading before the last slide is looked for.</summary>
+    private async Task FlushFolderFollowAsync()
     {
         _followTimer.Stop();
-        if (_follow.TakeFolderToOpen(_currentFolder, Directory.Exists) is not { } path) return;
+        if (_follow.TakePending(_currentFolder) is not { } path) return;
+        if (!await Task.Run(() => Directory.Exists(path))) return;
 
         // The slideshow just showed this folder (with its subfolders if that option is on), so the browser
         // should too: make it the new root of the "include subfolders" tree rather than switching the option off.
         _subfolders.FollowedSlideshowTo(path);
-        OpenFolder(path);
+        SelectPathInTree(path);
+        NavigateTo(path);
     }
 
     private void OnStartSlideshow(object sender, RoutedEventArgs e) => StartSlideshow(_settings.SlideshowDefaultFullScreen);
@@ -1462,10 +1466,14 @@ public partial class MainWindow : Window
         UpdateVisibleThumbnails();
     }
 
-    private void OnWatcherRootChanged()
+    private async void OnWatcherRootChanged()
     {
-        // The folder we were showing is gone (deleted or renamed): fall back to its nearest existing parent.
-        if (PathUtil.NearestExistingFolder(_currentFolder) is { } p) OpenFolder(p);
+        // The folder we were showing is gone (deleted or renamed, or its share dropped): fall back to its nearest
+        // existing parent. The search asks the disk several times, so it runs on a worker thread.
+        string? folder = _currentFolder;
+        if (await Task.Run(() => PathUtil.NearestExistingFolder(folder)) is not { } p) return;
+        SelectPathInTree(p);
+        NavigateTo(p);
     }
 
     private void RemoveItem(string path)

@@ -166,9 +166,9 @@ internal static class CommandTests
         {
             using var d = Tree();
             var j = new FolderJumper(d.File("lib/gone"), scanner, SortOrder.Default, false);
-            T.Eq(null, j.Anchor);
             var r = j.JumpAsync(+1, d.File("lib/1/a.jpg")).GetAwaiter().GetResult();
             Same(d.File("lib/3"), r.Target!.Path, "relative to the slide's folder instead");
+            T.True(j.Anchor != d.File("lib/gone"), "the missing start folder is dropped at the first jump");
         });
 
         T.Run("nothing to go by: a beep, no search and no message", () =>

@@ -29,11 +29,17 @@ public sealed class SlideshowFollow
     /// longer exists. Either way the pending folder is forgotten.
     /// </summary>
     public string? TakeFolderToOpen(string? currentFolder, Func<string, bool> folderExists)
+        => TakePending(currentFolder) is { } folder && folderExists(folder) ? folder : null;
+
+    /// <summary>
+    /// The pending folder, forgetting it, or null if nothing is pending or the browser already shows it. Doesn't check
+    /// that the folder exists, so the caller can do that off the UI thread (it may be on a share that has dropped).
+    /// </summary>
+    public string? TakePending(string? currentFolder)
     {
         string? folder = _pending;
         _pending = null;
-        if (folder == null || string.Equals(folder, currentFolder, PathUtil.Comparison) || !folderExists(folder)) return null;
-        return folder;
+        return folder == null || string.Equals(folder, currentFolder, PathUtil.Comparison) ? null : folder;
     }
 
     /// <param name="lastShown">The slide on screen when the slideshow closed.</param>

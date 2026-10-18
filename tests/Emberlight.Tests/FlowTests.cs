@@ -96,6 +96,16 @@ internal static class FlowTests
             T.Eq(null, f.TakeFolderToOpen(a, Exists), "and forgotten");
         });
 
+        T.Run("TakePending leaves the existence check to the caller", () =>
+        {
+            var f = new SlideshowFollow();
+            f.Jumped(b);
+            T.Eq(b, f.TakePending(a));
+            T.Eq(null, f.TakePending(a), "taken once");
+            f.Jumped(a);
+            T.Eq(null, f.TakePending(a.ToUpperInvariant()), "same folder, any case");
+        });
+
         T.Run("nothing jumped: nothing to open", () =>
             T.Eq(null, new SlideshowFollow().TakeFolderToOpen(a, Exists)));
 
