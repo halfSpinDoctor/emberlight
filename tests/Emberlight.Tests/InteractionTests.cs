@@ -124,6 +124,22 @@ internal static class InteractionTests
             T.Eq(1, a.ShowCount);
         });
 
+        T.Run("Prioritize puts the listed waiting cells in front, in order; the rest keep their place behind", () =>
+        {
+            var h = new Harness();
+            var items = Slots(8);
+            int stamp = h.Scheduler.NextStamp();
+            foreach (var s in items) s.WantedStamp = stamp;
+            for (int i = 0; i < 8; i++) h.Scheduler.Request(items[i]);   // one at a time: img7 ends up on top
+            h.Scheduler.Prioritize([items[2], items[3], items[4], items[3]]);   // a repeat is ignored
+            h.Drain();
+            T.SeqEq(new[] { "img2.jpg", "img3.jpg", "img4.jpg", "img7.jpg", "img6.jpg", "img5.jpg", "img1.jpg", "img0.jpg" }, h.Decoded);
+
+            // cells already loaded or not waiting are ignored, and an empty queue is fine
+            h.Scheduler.Prioritize(items);
+            h.Scheduler.Prioritize([]);
+        });
+
         T.Run("newest requests are served first; a range is decoded top to bottom", () =>
         {
             var h = new Harness();

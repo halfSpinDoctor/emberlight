@@ -115,6 +115,31 @@ public sealed class ThumbnailScheduler<TItem, TImage> : IDisposable
         for (int i = end - 1; i >= first; i--) Request(items[i]);   // reversed: served newest-first
     }
 
+    /// <summary>
+    /// UI thread only. Moves those of <paramref name="topFirst"/> that are waiting for a decode to the front of the
+    /// queue, in the given order (the first is decoded first); everything else keeps its place behind them. For a front
+    /// end that requests cells one at a time as they appear (each <see cref="Request"/> goes on top of the stack, so
+    /// a burst of cells would otherwise be served last to first): after the burst, pass the visible cells in reading order.
+    /// </summary>
+    public void Prioritize(IReadOnlyList<TItem> topFirst)
+    {
+        lock (_lock)
+        {
+            if (_pending.Count == 0) return;
+            var pending = new HashSet<TItem>(_pending, ReferenceEqualityComparer.Instance);
+            var front = new List<TItem>();                // the listed cells that are waiting, first listing wins
+            var seen = new HashSet<TItem>(ReferenceEqualityComparer.Instance);
+            foreach (var item in topFirst)
+                if (pending.Contains(item) && seen.Add(item)) front.Add(item);
+            if (front.Count == 0) return;
+
+            var behind = _pending.Where(i => !seen.Contains(i)).ToList();   // the stack enumerates from the top down
+            _pending.Clear();
+            for (int i = behind.Count - 1; i >= 0; i--) _pending.Push(behind[i]);
+            for (int i = front.Count - 1; i >= 0; i--) _pending.Push(front[i]);
+        }
+    }
+
     /// <summary>UI thread only. Loads from cache immediately or queues a background decode.</summary>
     public void Request(TItem item)
     {

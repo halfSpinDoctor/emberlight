@@ -662,6 +662,9 @@ deliveries that would go to the UI thread are collected and run by the test).
 - **a cached thumbnail that no longer matches its file is decoded again**: When the file check fails, the cell is
   queued instead of shown from the cache.
 - **loaded or already queued items aren't queued twice**: Asking twice queues once, and a loaded cell isn't queued.
+- **Prioritize puts the listed waiting cells in front, in order; the rest keep their place behind**: After eight
+  cells are requested one at a time (so the last is served first), `Prioritize` of cells 2, 3, 4 makes them decode in
+  that order before the rest, which keep their newest-first order; repeats, loaded cells and an empty queue are fine.
 - **newest requests are served first; a range is decoded top to bottom**: A visible range is decoded first cell first,
   and later requests jump ahead of earlier ones.
 - **requests for cells scrolled away are dropped without decoding and can be requested again**: Scrolling on before
