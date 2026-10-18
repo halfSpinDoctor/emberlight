@@ -132,6 +132,8 @@ internal static class FlowTests
             T.Eq($"Sorting {1500:N0} images\u2026", DisplayText.Sorting(1500, new SortOrder(SortField.DateModified, true)));
             T.Eq($"Preparing {1500:N0} images\u2026", DisplayText.Sorting(1500, SortOrder.Default), "name order opens no files");
             T.Eq($"Loading {20:N0} images\u2026", DisplayText.Loading(20));
+            T.Eq("Opening \"C:\\a\"\u2026", DisplayText.OpeningPath("C:\\a"));
+            T.Eq("Can't find \"C:\\a\". It may be on a drive or network share that isn't connected.", DisplayText.PathNotFound("C:\\a"));
             T.Eq("Sorting\u2026", DisplayText.Resorting);
         });
 

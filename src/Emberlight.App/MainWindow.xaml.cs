@@ -1258,22 +1258,32 @@ public partial class MainWindow : Window
     {
         var dlg = new OpenFolderDialog { Title = "Choose a folder of images" };
         if (_currentFolder != null) dlg.InitialDirectory = _currentFolder;
-        if (dlg.ShowDialog(this) == true) await OpenFolderAsync(dlg.FolderName);
+        if (dlg.ShowDialog(this) == true) await OpenPathAsync(dlg.FolderName, allowFile: false);
     }
 
     /// <summary>
-    /// Opens the folder if it exists. Whether it exists is asked on a worker thread: it may be on a share that isn't
-    /// connected, which can take a while to answer. Returns whether it was opened (false if it's missing, or if
-    /// another folder was opened meanwhile).
+    /// Opens a folder (or, with <paramref name="allowFile"/>, a file's folder with the file selected) if it exists.
+    /// Whether it exists is asked on a worker thread: the path may be on a share that isn't connected, which can take
+    /// as long as Windows takes to give up. The status bar says what is being waited for, and says so if nothing is
+    /// found. Only the latest open goes ahead.
     /// </summary>
-    private async Task<bool> OpenFolderAsync(string path, string? selectWhenLoaded = null)
+    private async Task OpenPathAsync(string path, bool allowFile)
     {
         int version = ++_openVersion;
-        if (!await Task.Run(() => Directory.Exists(path)) || version != _openVersion) return false;
-        if (selectWhenLoaded != null) _pendingSelectPath = selectWhenLoaded;
-        SelectPathInTree(path);
-        NavigateTo(path);
-        return true;
+        bool ownsBusy = !_isLoading;            // a folder load in progress already has the busy indicator
+        if (ownsBusy) BeginBusy(DisplayText.OpeningPath(path));
+        int kind = await Task.Run(() => Directory.Exists(path) ? 1 : allowFile && File.Exists(path) ? 2 : 0);
+        if (version != _openVersion) return;    // a newer open took over
+        if (kind == 0)
+        {
+            if (ownsBusy && !_isLoading) EndBusy();
+            StatusText.Text = DisplayText.PathNotFound(path);
+            return;
+        }
+        string folder = kind == 1 ? path : Path.GetDirectoryName(path)!;
+        if (kind == 2) _pendingSelectPath = path;
+        SelectPathInTree(folder);
+        NavigateTo(folder);
     }
 
     private void OnExit(object sender, RoutedEventArgs e) => Close();
@@ -1464,11 +1474,7 @@ public partial class MainWindow : Window
     {
         if (e.Data.GetData(DataFormats.FileDrop) is not string[] dropped || dropped.Length == 0) return;
         string first = dropped[0];
-        // A folder opens as is; a file opens its folder with the file selected. Both questions go to a worker.
-        bool isFolder = await Task.Run(() => Directory.Exists(first));
-        if (isFolder) { await OpenFolderAsync(first); return; }
-        if (Path.GetDirectoryName(first) is { } dir && await Task.Run(() => File.Exists(first)))
-            await OpenFolderAsync(dir, selectWhenLoaded: first);
+        await OpenPathAsync(first, allowFile: true);    // a folder opens as is; a file opens its folder, selected
     }
 
     // ===============================================================================================

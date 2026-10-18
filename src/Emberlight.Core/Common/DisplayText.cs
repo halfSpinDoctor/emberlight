@@ -22,6 +22,13 @@ public static class DisplayText
 
     public static string Loading(int count) => $"Loading {count:N0} images…";
 
+    /// <summary>Shown while File &gt; Open or a drop finds out whether the path exists (a dead network share can take a while).</summary>
+    public static string OpeningPath(string path) => $"Opening \"{path}\"…";
+
+    /// <summary>The status bar line when File &gt; Open or a drop can't find what was chosen.</summary>
+    public static string PathNotFound(string path)
+        => $"Can't find \"{path}\". It may be on a drive or network share that isn't connected.";
+
     // ---- window titles -------------------------------------------------------------------------------
 
     public static string BrowserTitle(string folder) => $"{new DirectoryInfo(folder).Name} — {AppName}";
