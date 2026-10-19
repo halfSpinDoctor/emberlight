@@ -11,3 +11,6 @@ artifacts/
 .idea/
 *.user
 *.suo
+
+# macOS
+.DS_Store
