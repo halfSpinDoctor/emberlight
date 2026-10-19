@@ -95,7 +95,7 @@ public partial class MainWindow : Window
         _drivePoll.Tick += OnDrivePoll;
         Loaded += OnLoaded;
         Closing += OnClosing;
-        Closed += (_, _) => { _drivePoll.Stop(); _watcher.Dispose(); _loader.Dispose(); };
+        Closed += (_, _) => { _drivePoll.Stop(); RunOnWatcherQueue(_watcher.Dispose); _loader.Dispose(); };
     }
 
     // ===============================================================================================
@@ -458,6 +458,15 @@ public partial class MainWindow : Window
     // Navigation and scanning
     // ===============================================================================================
 
+    private Task _watcherQueue = Task.CompletedTask;
+
+    /// <summary>
+    /// Runs a watcher call (Stop, Watch, Dispose) on a worker thread, one at a time and in order. Closing or opening a
+    /// directory handle on a share whose connection has dropped can block for tens of seconds, which must not freeze the UI.
+    /// </summary>
+    private void RunOnWatcherQueue(Action action)
+        => _watcherQueue = _watcherQueue.ContinueWith(_ => { try { action(); } catch { } }, TaskScheduler.Default);
+
     /// <param name="inPlace">Rescanning the folder on screen: keep the grid as it is while scanning, then update it in
     /// place (<see cref="ApplyRescan"/>), so nothing flickers. Opening a folder (or F5) starts from an empty grid.</param>
     private async void NavigateTo(string path, bool inPlace = false)
@@ -477,7 +486,7 @@ public partial class MainWindow : Window
         _isLoading = true;
         _currentFolder = path;
         HighlightCurrentPin();
-        _watcher.Stop();
+        RunOnWatcherQueue(_watcher.Stop);
         _listing.ResetMetadata();
         if (inPlace)
         {
@@ -531,7 +540,7 @@ public partial class MainWindow : Window
             Populate(files);
         }
 
-        _watcher.Watch(path, recurse);
+        RunOnWatcherQueue(() => _watcher.Watch(path, recurse));
         if (_pendingSelectPath != null && _listing.TryGet(_pendingSelectPath, out var wanted))
         {
             ThumbList.SelectedItem = wanted;
