@@ -3,6 +3,24 @@
 Each release's notes. The release workflow copies the section for the tag it is building into the GitHub release,
 above GitHub's automatic list of commits. Earlier releases (v0.1.0, v0.2.0) have only that automatic list.
 
+## v0.2.2 - 2026-10-19
+
+**New**
+
+- Pinned folders: pin folders to a list above the folder tree (File > Pinned Folders, or right-click a folder in the
+  tree), open the first nine with Ctrl+1 to Ctrl+9, reorder them, and give a pin its own name (Rename Pin).
+- Right-click menu on thumbnails (Copy To, Move To, Rename, Move to Recycle Bin) and a Rename command (File menu, F2).
+
+**Network shares and responsiveness**
+
+- The window no longer freezes when a network connection (VPN or Wi-Fi) drops while you are browsing a share, and it
+  recovers when the connection returns.
+- Opening a dead network location, or starting with a last-viewed folder that is no longer reachable, no longer
+  freezes the window; existence checks, the info panel's size and EXIF reads, and slideshow folder jumps now run in
+  the background.
+- Folders on network shares load faster: sorting by size, date or EXIF date reads file information in parallel, and
+  the latest sort request wins when several are made in a row.
+
 ## v0.2.1 - 2026-10-16
 
 This release reorganizes the application and Core logic, and fixes bugs.

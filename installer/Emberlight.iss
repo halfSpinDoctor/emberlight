@@ -5,7 +5,7 @@
 ; the "Open with" list for common image types. It does NOT take over your default image viewer.
 
 #define MyAppName "Emberlight"
-#define MyAppVersion "0.2.1"
+#define MyAppVersion "0.2.2"
 #define MyAppExeName "Emberlight.exe"
 
 [Setup]
